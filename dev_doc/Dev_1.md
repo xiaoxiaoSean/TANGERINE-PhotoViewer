@@ -36,11 +36,11 @@
 
 ## 4. 大于 100 MiB 的图片与局部读取
 
-**思路：** 以文件字节大小 `100 * 1024 * 1024` 为界；大文件先按当前图片浏览区的实际屏幕像素生成缩略图。停留在最小倍率时只显示缩略图。放大后按解码器的真实能力分流：可快速随机读取的分块格式直接取当前视口高清区域；其他格式在后台顺序解码一次并写成可随机读取的分块金字塔缓存，完成后读取高清区域。
+**思路：** 以文件字节大小 `100 * 1024 * 1024` 为界；大文件先按当前图片浏览区的屏幕物理像素生成预览图，并在有限像素预算内保留少量缩放余量。最小倍率显示这张适屏图，窗口扩大或 DPI 变化使像素不足时异步重新生成。放大后按解码器的真实能力分流：可快速随机读取的分块格式直接取当前视口高清区域；其他格式在后台顺序解码一次并写成可随机读取的分块金字塔缓存，完成后读取高清区域。
 
-**原理：** `OpenAsync` 用 `VisualTreeHelper.GetDpi(Viewer)` 把浏览区大小换算成屏幕像素，将宽高传给 `ImageLoader.Load`；大文件由 `NetVips.Thumbnail` 生成相应大小的缩略图，保留原始分辨率元数据。`ImageLoader.SupportsFastRegionAccess` 依据文件内容选中的 libvips 加载器读取 `ForeignFlags.PARTIAL` 能力；分块 TIFF 等真正支持局部读取的文件直接进入高清区域路径。若 TIFF 自带合适的金字塔缩小层，先选对应层，再按行拆为最多四段并行裁切，合成一张图更新画面。对条带 TIFF、常规 JPEG/PNG 等顺序格式，首次放大时 `PrepareCacheAsync` 在后台调用 `ImageLoader.PrepareRandomAccessCache`，使用顺序加载器把原图写成临时分块金字塔 BigTIFF；完成后同样通过最多四个线程读取可见区域。建缓存期间仍可缩放和拖动现有预览图，状态栏显示准备进度；取消、换图、卸载或关闭窗口会停止准备并清理临时文件。当前所需原图或可用金字塔层区域超过 1600 万像素时暂用预览图，控制内存。文件在处理期间被删除、失效或无法再读取时，异常会显示在状态栏。
+**原理：** `OpenAsync` 用 `VisualTreeHelper.GetDpi(Viewer)` 把浏览区大小换算成屏幕物理像素，并在 800 万像素的预览预算内最多提高到 1.5 倍采样密度；大文件由 `NetVips.Thumbnail` 缩小并用无损 PNG 传给 WPF，保留原始分辨率元数据。`ImageLoader.SupportsFastRegionAccess` 依据文件内容选中的 libvips 加载器读取 `ForeignFlags.PARTIAL` 能力；分块 TIFF 等真正支持局部读取的文件直接进入高清区域路径。若 TIFF 自带合适的金字塔缩小层，选择仍具有至少约 1.5 倍目标物理像素的层，然后由 libvips 的 Lanczos 缩放完成输出。区域渲染按 DPI 产生屏幕需要的像素，不再按原图裁剪面积直接退回低清预览；单次裁剪与缩放让 libvips 使用最多四个工作线程，不把图片按横条分别缩放，避免接缝。对条带 TIFF、常规 JPEG/PNG 等顺序格式，首次放大时 `PrepareCacheAsync` 在后台调用 `ImageLoader.PrepareRandomAccessCache`，使用顺序加载器把原图写成临时分块金字塔 BigTIFF；完成后读取可见区域。建缓存期间仍可缩放和拖动现有预览图，状态栏显示准备进度；取消、换图、卸载或关闭窗口会停止准备并清理临时文件。文件在处理期间被删除、失效或无法再读取时，异常会显示在状态栏。
 
-**调用：** 用户正常打开大文件即可；最小倍率显示按浏览区分辨率制作的预览。可局部读取的格式在放大或移动时触发 `QueueRender()` → `RenderAsync()` → `ImageLoader.LoadRegionParallelAsync(...)`。其他格式首次放大时触发 `QueueRender()` → `PrepareCacheAsync()` → `ImageLoader.PrepareRandomAccessCache(...)`；缓存完成后自动调用并行区域渲染。创建缓存需要一次完整顺序扫描和足够的临时磁盘空间，10–20 GB 文件可能花较长时间，但不会重复启动多路全图解码。
+**调用：** 用户正常打开大文件即可；最小倍率显示按浏览区物理分辨率制作的预览，预览区扩大时 `QueueRender()` → `RefreshPreviewAsync()` → `ImageLoader.LoadPreview(...)` 更新它。可局部读取的格式在放大或移动时触发 `QueueRender()` → `RenderAsync()` → `ImageLoader.LoadRegionParallelAsync(...)`。其他格式首次放大时触发 `QueueRender()` → `PrepareCacheAsync()` → `ImageLoader.PrepareRandomAccessCache(...)`；缓存完成后自动调用区域渲染。创建缓存需要一次完整顺序扫描和足够的临时磁盘空间，10–20 GB 文件可能花较长时间，但不会重复启动多路全图解码。
 
 ## 5. 缩放、最小倍率和旋转
 

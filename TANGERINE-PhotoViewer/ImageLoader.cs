@@ -13,12 +13,11 @@ internal static class ImageLoader
     internal sealed record LoadedImage(BitmapSource Image, bool IsGif, bool IsLarge, bool FastRegionAccess,
         int PixelWidth, int PixelHeight, long FileSize, string Format);
 
-    public const long MaximumRegionPixels = 16_000_000;
-
     public static void PrepareRandomAccessCache(string sourcePath, string cachePath,
         CancellationToken token, IProgress<int> progress)
     {
         token.ThrowIfCancellationRequested();
+        NetVips.NetVips.Concurrency = Math.Clamp(Environment.ProcessorCount, 2, 4);
         using var image = VipsImage.NewFromFile(sourcePath, access: NetVips.Enums.Access.Sequential);
         image.SetProgress(progress, token);
         token.ThrowIfCancellationRequested();
@@ -46,11 +45,9 @@ internal static class ImageLoader
             var format = image.GetTypeOf("vips-loader") != 0
                 ? image.Get("vips-loader")?.ToString() ?? LanguageManager.Get("UnknownFormat")
                 : LanguageManager.Get("UnknownFormat");
-            using var preview = large
-                ? VipsImage.Thumbnail(path, Math.Max(1, previewWidth), height: Math.Max(1, previewHeight))
-                : VipsImage.NewFromFile(path, access: NetVips.Enums.Access.Random);
-            preview.SetProgress(progress, token);
-            var bitmap = FromPng(preview.WriteToBuffer(".png"));
+            var bitmap = large
+                ? LoadPreview(path, previewWidth, previewHeight, token, progress)
+                : LoadFullImage(path, token, progress);
             token.ThrowIfCancellationRequested();
             return new LoadedImage(bitmap, gif, large, large && SupportsFastRegionAccess(path, token),
                 width, height, fileSize, format);
@@ -74,6 +71,26 @@ internal static class ImageLoader
             token.ThrowIfCancellationRequested();
             throw new NotSupportedException(LanguageManager.Get("LargeFormatUnsupported"), ex);
         }
+    }
+
+    public static BitmapSource LoadPreview(string path, int targetWidth, int targetHeight,
+        CancellationToken token, IProgress<int> progress)
+    {
+        token.ThrowIfCancellationRequested();
+        NetVips.NetVips.Concurrency = Math.Clamp(Environment.ProcessorCount, 2, 4);
+        using var preview = VipsImage.Thumbnail(path, Math.Max(1, targetWidth),
+            height: Math.Max(1, targetHeight), size: NetVips.Enums.Size.Down);
+        preview.SetProgress(progress, token);
+        var bitmap = FromPng(preview.WriteToBuffer(".png"));
+        token.ThrowIfCancellationRequested();
+        return bitmap;
+    }
+
+    private static BitmapSource LoadFullImage(string path, CancellationToken token, IProgress<int> progress)
+    {
+        using var image = VipsImage.NewFromFile(path, access: NetVips.Enums.Access.Random);
+        image.SetProgress(progress, token);
+        return FromPng(image.WriteToBuffer(".png"));
     }
 
     public static BitmapSource LoadRegion(string path, Int32Rect rect, int rotation, double displayScale,
@@ -165,8 +182,8 @@ internal static class ImageLoader
             return image;
 
         var selected = image;
-        var targetWidth = Math.Max(1, Math.Ceiling(rect.Width * displayScale));
-        var targetHeight = Math.Max(1, Math.Ceiling(rect.Height * displayScale));
+        var targetWidth = Math.Max(1, Math.Ceiling(rect.Width * displayScale * 1.5));
+        var targetHeight = Math.Max(1, Math.Ceiling(rect.Height * displayScale * 1.5));
         var rotated = rotation is 90 or 270;
         for (var level = 0; level < 16; level++)
         {
@@ -206,66 +223,8 @@ internal static class ImageLoader
         double displayScale, CancellationToken token, IProgress<int> progress)
     {
         token.ThrowIfCancellationRequested();
-        if ((long)rect.Width * rect.Height > MaximumRegionPixels &&
-            !CanUseTiffPyramid(path, rect, rotation, displayScale)) return null;
-        var workerCount = Math.Min(rect.Height, Math.Clamp(Environment.ProcessorCount, 2, 4));
-        if (workerCount < 2)
-            return await Task.Run(() => LoadRegion(path, rect, rotation, displayScale, token, progress), token);
-
-        var completed = new int[workerCount];
-        var tasks = new Task<BitmapSource>[workerCount];
-        for (var index = 0; index < workerCount; index++)
-        {
-            var workerIndex = index;
-            var firstRow = rect.Height * index / workerCount;
-            var lastRow = rect.Height * (index + 1) / workerCount;
-            var section = new Int32Rect(rect.X, rect.Y + firstRow, rect.Width, lastRow - firstRow);
-            var sectionProgress = new Progress<int>(value =>
-            {
-                completed[workerIndex] = Math.Clamp(value, 0, 100);
-                progress.Report(completed.Sum() / workerCount);
-            });
-            tasks[index] = Task.Run(() => LoadRegion(path, section, rotation, displayScale, token, sectionProgress), token);
-        }
-
-        var sections = await Task.WhenAll(tasks);
-        token.ThrowIfCancellationRequested();
-        var result = await Task.Run(() => JoinSections(sections, token), token);
-        token.ThrowIfCancellationRequested();
-        progress.Report(100);
-        return result;
-    }
-
-    private static bool CanUseTiffPyramid(string path, Int32Rect rect, int rotation, double displayScale)
-    {
-        if (displayScale >= 1 || !(VipsImage.FindLoad(path) ?? string.Empty).Contains("Tiff",
-                StringComparison.OrdinalIgnoreCase)) return false;
-        using var image = OpenRegionLevel(path, rect, rotation, displayScale, out _, out var fullWidth,
-            out var fullHeight);
-        if (image.Width == fullWidth || image.Height == fullHeight) return false;
-        return (long)rect.Width * image.Width / fullWidth *
-            ((long)rect.Height * image.Height / fullHeight) <= MaximumRegionPixels;
-    }
-
-    private static BitmapSource JoinSections(IReadOnlyList<BitmapSource> sections, CancellationToken token)
-    {
-        var width = sections.Max(section => section.PixelWidth);
-        var height = sections.Sum(section => section.PixelHeight);
-        var bitmap = new WriteableBitmap(width, height, 96, 96, PixelFormats.Bgra32, null);
-        var top = 0;
-        foreach (var section in sections)
-        {
-            token.ThrowIfCancellationRequested();
-            var converted = new FormatConvertedBitmap(section, PixelFormats.Bgra32, null, 0);
-            var stride = checked(section.PixelWidth * 4);
-            var pixels = new byte[checked(stride * section.PixelHeight)];
-            converted.CopyPixels(pixels, stride, 0);
-            bitmap.WritePixels(new Int32Rect(0, top, section.PixelWidth, section.PixelHeight), pixels, stride, 0);
-            top += section.PixelHeight;
-        }
-        token.ThrowIfCancellationRequested();
-        bitmap.Freeze();
-        return bitmap;
+        NetVips.NetVips.Concurrency = Math.Clamp(Environment.ProcessorCount, 2, 4);
+        return await Task.Run(() => LoadRegion(path, rect, rotation, displayScale, token, progress), token);
     }
 
     public static int ExportGif(string path, string directory, CancellationToken token, IProgress<int> progress)

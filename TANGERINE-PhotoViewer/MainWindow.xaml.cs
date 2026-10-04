@@ -14,6 +14,8 @@ namespace TANGERINE_PhotoViewer;
 public partial class MainWindow : Window
 {
     private const long LargeFileBytes = 100L * 1024 * 1024;
+    private const double PreviewSamplingFactor = 1.5;
+    private const double MaximumPreviewOversamplePixels = 8_000_000;
     private CancellationTokenSource? operation;
     private readonly Dictionary<CancellationToken, CancellationTokenSource> activeOperations = new();
     private long generation;
@@ -178,9 +180,7 @@ public partial class MainWindow : Window
         {
             ShowProgress("OpeningProgress");
             var progress = new Progress<int>(value => { if (workGeneration == generation && !token.IsCancellationRequested) StatusLabel.Content = string.Format(LanguageManager.Get("OpeningProgress"), value); });
-            var dpi = VisualTreeHelper.GetDpi(Viewer);
-            var previewWidth = Math.Max(1, (int)Math.Ceiling(Viewer.ActualWidth * dpi.DpiScaleX));
-            var previewHeight = Math.Max(1, (int)Math.Ceiling(Viewer.ActualHeight * dpi.DpiScaleY));
+            var (previewWidth, previewHeight) = PreviewPixelSize(Viewer.ActualWidth, Viewer.ActualHeight);
             var result = await Task.Run(() => NativeWork.Run(() => ImageLoader.Load(
                 file, LargeFileBytes, previewWidth, previewHeight, token, progress), token), token);
             token.ThrowIfCancellationRequested();
@@ -410,9 +410,9 @@ public partial class MainWindow : Window
             UpdateGeometry();
             UpdateZoomLabel();
             UpdateZoomControls();
-            if (large) QueueRender();
         }
         else UpdateZoomControls();
+        if (large) QueueRender();
     }
 
     private void Rotate(int degrees)
@@ -771,6 +771,7 @@ public partial class MainWindow : Window
         {
             operation?.Cancel();
             Photo.Source = null;
+            if (PreviewNeedsMorePixels()) renderDelay.Start();
             return;
         }
         if (!fastRegionAccess)
@@ -784,6 +785,26 @@ public partial class MainWindow : Window
             }
         }
         renderDelay.Start();
+    }
+
+    private bool PreviewNeedsMorePixels()
+    {
+        if (source is null) return false;
+        var (displayedWidth, displayedHeight) = PreviewPixelSize(Surface.Width, Surface.Height);
+        var previewWidth = rotation is 90 or 270 ? source.PixelHeight : source.PixelWidth;
+        var previewHeight = rotation is 90 or 270 ? source.PixelWidth : source.PixelHeight;
+        return previewWidth + 1 < displayedWidth || previewHeight + 1 < displayedHeight;
+    }
+
+    private (int Width, int Height) PreviewPixelSize(double width, double height)
+    {
+        var dpi = VisualTreeHelper.GetDpi(Viewer);
+        var physicalWidth = Math.Max(1, width * dpi.DpiScaleX);
+        var physicalHeight = Math.Max(1, height * dpi.DpiScaleY);
+        var factor = Math.Min(PreviewSamplingFactor,
+            Math.Max(1, Math.Sqrt(MaximumPreviewOversamplePixels / (physicalWidth * physicalHeight))));
+        return ((int)Math.Ceiling(Math.Min(int.MaxValue, physicalWidth * factor)),
+            (int)Math.Ceiling(Math.Min(int.MaxValue, physicalHeight * factor)));
     }
 
     private void CancelCachePreparation()
@@ -857,8 +878,13 @@ public partial class MainWindow : Window
 
     private async Task RenderAsync()
     {
-        if (!large || path is null || source is null || scale <= MinimumScale() * 1.00001 ||
-            (!fastRegionAccess && preparedRegionPath is null)) return;
+        if (!large || path is null || source is null) return;
+        if (scale <= MinimumScale() * 1.00001)
+        {
+            if (PreviewNeedsMorePixels()) await RefreshPreviewAsync();
+            return;
+        }
+        if (!fastRegionAccess && preparedRegionPath is null) return;
         var file = path;
         var decodePath = fastRegionAccess ? file : preparedRegionPath!;
         var token = BeginWork();
@@ -876,7 +902,8 @@ public partial class MainWindow : Window
                 Math.Ceiling(Viewer.ViewportHeight / scale)) + 2));
             var viewport = new Int32Rect(viewX, viewY, viewWidth, viewHeight);
             var angle = rotation;
-            var displayScale = scale;
+            var dpi = VisualTreeHelper.GetDpi(Viewer);
+            var displayScale = scale * Math.Max(dpi.DpiScaleX, dpi.DpiScaleY);
             var progress = new Progress<int>(value =>
             {
                 if (value > 0 && workGeneration == generation && !token.IsCancellationRequested)
@@ -893,7 +920,9 @@ public partial class MainWindow : Window
             token.ThrowIfCancellationRequested();
             if (workGeneration != generation || file != path || angle != rotation ||
                 (!fastRegionAccess && decodePath != preparedRegionPath) ||
-                Math.Abs(displayScale - scale) > 0.0000001 || scale <= MinimumScale() * 1.00001) return;
+                Math.Abs(displayScale - scale * Math.Max(VisualTreeHelper.GetDpi(Viewer).DpiScaleX,
+                    VisualTreeHelper.GetDpi(Viewer).DpiScaleY)) > 0.0000001 ||
+                scale <= MinimumScale() * 1.00001) return;
             if (stopRequested) return;
             if (tile is null)
             {
@@ -909,6 +938,39 @@ public partial class MainWindow : Window
                 Canvas.SetLeft(Photo, viewport.X * scale); Canvas.SetTop(Photo, viewport.Y * scale);
             }
             finally { renderSuspended = false; }
+            StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
+        }
+        catch (OperationCanceledException) { if (workGeneration == generation) StatusLabel.Content = LanguageManager.Get("Stopped"); }
+        catch (Exception ex) { if (workGeneration == generation) StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), ex.Message); }
+        finally { EndWork(token); }
+    }
+
+    private async Task RefreshPreviewAsync()
+    {
+        if (path is null || source is null) return;
+        var file = path;
+        var angle = rotation;
+        var requestedScale = scale;
+        var (width, height) = PreviewPixelSize(Surface.Width, Surface.Height);
+        if (angle is 90 or 270) (width, height) = (height, width);
+        var token = BeginWork();
+        var workGeneration = generation;
+        try
+        {
+            StatusLabel.Content = LanguageManager.Get("ReadingRegionPreparing");
+            var progress = new Progress<int>(value =>
+            {
+                if (value > 0 && workGeneration == generation && !token.IsCancellationRequested)
+                    StatusLabel.Content = string.Format(LanguageManager.Get("ReadingProgress"), value);
+            });
+            var preview = await Task.Run(() => ImageLoader.LoadPreview(file, width, height, token, progress), token);
+            token.ThrowIfCancellationRequested();
+            if (workGeneration != generation || file != path || angle != rotation ||
+                Math.Abs(requestedScale - scale) > 0.0000001 ||
+                scale > MinimumScale() * 1.00001 || stopRequested) return;
+            source = preview;
+            UpdateGeometry();
+            UpdateNavigatorImage();
             StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
         }
         catch (OperationCanceledException) { if (workGeneration == generation) StatusLabel.Content = LanguageManager.Get("Stopped"); }
