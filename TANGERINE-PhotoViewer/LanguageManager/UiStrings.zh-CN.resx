@@ -1,0 +1,266 @@
+<root>
+  <data name="AppTitle">
+    <value>橘子图片查看器</value>
+  </data>
+  <data name="ChooseExportFolder">
+    <value>选择 GIF 帧的导出文件夹</value>
+  </data>
+  <data name="DefaultAppsDescription">
+    <value>注册此查看器，并在 Windows 默认应用中选择图片类型。</value>
+  </data>
+  <data name="ExportedFrames">
+    <value>已导出 {0} 帧</value>
+  </data>
+  <data name="ExportFrames">
+    <value>导出 GIF 帧</value>
+  </data>
+  <data name="ExportProgress">
+    <value>正在导出帧 {0}%</value>
+  </data>
+  <data name="FileFilter">
+    <value>图片文件|*.*</value>
+  </data>
+  <data name="GifTools">
+    <value>GIF工具</value>
+  </data>
+  <data name="MissingExecutable">
+    <value>无法取得程序路径</value>
+  </data>
+  <data name="NotGif">
+    <value>文件不是 GIF</value>
+  </data>
+  <data name="Open">
+    <value>打开</value>
+  </data>
+  <data name="OpenDefaultApps">
+    <value>打开 Windows 默认应用</value>
+  </data>
+  <data name="Opened">
+    <value>已打开 {0}</value>
+  </data>
+  <data name="OpeningProgress">
+    <value>正在打开文件 {0}%</value>
+  </data>
+  <data name="OperationFailed">
+    <value>操作失败：{0}</value>
+  </data>
+  <data name="ReadingProgress">
+    <value>正在读取图片 {0}%</value>
+  </data>
+  <data name="Ready">
+    <value>就绪</value>
+  </data>
+  <data name="RotateLeft">
+    <value>向左旋转90度</value>
+  </data>
+  <data name="RotateRight">
+    <value>向右旋转90度</value>
+  </data>
+  <data name="Stop">
+    <value>停止工作</value>
+  </data>
+  <data name="Stopped">
+    <value>工作已停止</value>
+  </data>
+  <data name="SystemOperations">
+    <value>系统操作</value>
+  </data>
+  <data name="Unload">
+    <value>卸载文件</value>
+  </data>
+  <data name="UnloadingProgress">
+    <value>正在卸载文件 {0}%</value>
+  </data>
+  <data name="UnsupportedImage">
+    <value>不支持的图片文件</value>
+  </data>
+  <data name="ZoomIn">
+    <value>放大</value>
+  </data>
+  <data name="ZoomOut">
+    <value>缩小</value>
+  </data>
+  <data name="ZoomPercent">
+    <value>缩放 {0}%</value>
+  </data>
+  <data name="LargeFormatUnsupported">
+    <value>此格式无法按区域读取超过 100 MB 的图片。</value>
+  </data>
+  <data name="DefaultAppsExecutableMissing">
+    <value>查看器程序文件不可用。</value>
+  </data>
+  <data name="DefaultAppsNotifyFailed">
+    <value>无法刷新 Windows 关联。</value>
+  </data>
+  <data name="DefaultAppsUnsupported">
+    <value>默认应用需要 Windows 10 或更高版本。</value>
+  </data>
+  <data name="DefaultAppsLatestWriteFailed">
+    <value>无法写入当前 Windows 关联。</value>
+  </data>
+  <data name="DefaultAppsLatestRollbackFailed">
+    <value>无法恢复先前的 Windows 关联。</value>
+  </data>
+  <data name="DefaultAppsLatestUnsupported">
+    <value>不支持此 Windows 关联格式。</value>
+  </data>
+  <data name="DefaultAppsAutomaticRejected">
+    <value>Windows 未接受默认应用设置。</value>
+  </data>
+  <data name="DefaultAppsLatestHashFailed">
+    <value>无法计算当前 Windows 关联哈希。</value>
+  </data>
+  <data name="DefaultAppsApplicationDescription">
+    <value>使用橘子图片查看器查看图片</value>
+  </data>
+  <data name="DefaultAppsAutomaticWriteFailed">
+    <value>无法写入默认应用设置。</value>
+  </data>
+  <data name="DefaultAppsVersionFallback">
+    <value>无法读取 Windows 修订版本；使用通用设置页面。</value>
+  </data>
+  <data name="DefaultAppsRegistrationBusy">
+    <value>另一项关联操作正在运行。</value>
+  </data>
+  <data name="DefaultAppsAutomaticRollbackFailed">
+    <value>无法恢复先前的默认应用设置。</value>
+  </data>
+  <data name="DefaultAppsRollbackFailed">
+    <value>无法恢复先前的注册信息。</value>
+  </data>
+  <data name="DefaultAppsQueryFailed">
+    <value>无法验证当前默认应用。</value>
+  </data>
+  <data name="DefaultAppsLatestRejected">
+    <value>Windows 拒绝了默认应用设置。</value>
+  </data>
+  <data name="DefaultAppsRegistrationFailed">
+    <value>无法注册此查看器。</value>
+  </data>
+  <data name="DefaultAppsAutomaticUnsupported">
+    <value>此 Windows 版本无法自动设置默认应用。</value>
+  </data>
+  <data name="DefaultAppsLaunchFailed">
+    <value>无法打开 Windows 默认应用。</value>
+  </data>
+  <data name="DefaultAppsHashFailed">
+    <value>无法计算 Windows 关联哈希。</value>
+  </data>
+  <data name="DefaultAppsLaunchFallback">
+    <value>已打开通用默认应用页面。</value>
+  </data>
+  <data name="DefaultAppsCompleted">
+    <value>所选格式现在使用此查看器。</value>
+  </data>
+  <data name="DefaultAppsWait">
+    <value>正在完成关联操作后关闭...</value>
+  </data>
+  <data name="DefaultAppsSettingsOpened">
+    <value>已打开 Windows 默认应用。</value>
+  </data>
+  <data name="DefaultAppsProgress">
+    <value>正在处理 {0}/{1}：{2}</value>
+  </data>
+  <data name="DefaultAppsChooseFormats">
+    <value>至少选择一种格式。</value>
+  </data>
+  <data name="DefaultAppsUseThisApp">
+    <value>将此查看器设为默认</value>
+  </data>
+  <data name="ImageDetails">
+    <value>查看详细信息</value>
+  </data>
+  <data name="DetailsResolutionValue">
+    <value>{0} × {1} 像素</value>
+  </data>
+  <data name="DetailsResolution">
+    <value>分辨率</value>
+  </data>
+  <data name="DetailsFormat">
+    <value>格式</value>
+  </data>
+  <data name="DetailsFileSizeValue">
+    <value>{0:N0} 字节（{1:N2} MiB）</value>
+  </data>
+  <data name="DetailsName">
+    <value>名称</value>
+  </data>
+  <data name="DetailsFileSize">
+    <value>文件大小</value>
+  </data>
+  <data name="UnknownFormat">
+    <value>未知</value>
+  </data>
+  <data name="DetailsPath">
+    <value>路径</value>
+  </data>
+  <data name="DetailsRow">
+    <value>{0}：{1}</value>
+  </data>
+  <data name="DefaultAppsUnregisterFormatRemoved">
+    <value>已删除 {0} 的注册。</value>
+  </data>
+  <data name="DefaultAppsUnregisterRegistrationFailed">
+    <value>无法删除全部注册。</value>
+  </data>
+  <data name="DefaultAppsUnregisterStillDefault">
+    <value>此查看器仍是当前默认应用。</value>
+  </data>
+  <data name="DefaultAppsUnregisterBusy">
+    <value>另一项关联操作正在运行。</value>
+  </data>
+  <data name="DefaultAppsUnregisterAll">
+    <value>全部取消设置并删除注册</value>
+  </data>
+  <data name="DefaultAppsSelectAll">
+    <value>全选</value>
+  </data>
+  <data name="DefaultAppsSelectNone">
+    <value>全不选</value>
+  </data>
+  <data name="DefaultAppsUnregisterRollbackFailed">
+    <value>无法恢复先前的关联。</value>
+  </data>
+  <data name="DefaultAppsUnregisterFormatFailed">
+    <value>移除 {0} 失败：{1}</value>
+  </data>
+  <data name="DefaultAppsUnregisterChoiceCleared">
+    <value>已取消 {0} 的默认选择。</value>
+  </data>
+  <data name="DefaultAppsUnregisterWorking">
+    <value>正在取消此查看器的默认关联……</value>
+  </data>
+  <data name="DefaultAppsUnregisterCompleted">
+    <value>已移除 {0} 个图片关联。</value>
+  </data>
+  <data name="DefaultAppsUnregisterChoiceFailed">
+    <value>无法取消全部默认选择。</value>
+  </data>
+  <data name="DefaultAppsUnregisterRenameFailed">
+    <value>无法重命名注册表项 {0}。</value>
+  </data>
+  <data name="DefaultAppsUnregisterUnknownAssociations">
+    <value>此查看器注册中仍有未知文件关联。</value>
+  </data>
+  <data name="DefaultAppsUnregisterOwnershipChanged">
+    <value>注册信息的所属应用已变化：{0}</value>
+  </data>
+  <data name="NavigatorMaximum">
+    <value>鸟览图已达到最大面积（预览区的 1/4）。</value>
+  </data>
+  <data name="NavigatorMinimum">
+    <value>鸟览图已达到最小面积（预览区的 1/200）。</value>
+  </data>
+  <data name="NextImage">
+    <value>下一张</value>
+  </data>
+  <data name="PreviousImageSymbol">
+    <value>◀</value>
+  </data>
+  <data name="PreviousImage">
+    <value>上一张</value>
+  </data>
+  <data name="NextImageSymbol">
+    <value>▶</value>
+  </data>
+</root>

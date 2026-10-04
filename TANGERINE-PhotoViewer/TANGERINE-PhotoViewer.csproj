@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -7,6 +7,19 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationIcon>Assets\TANGERINE-PV.ico</ApplicationIcon>
+    <NeutralLanguage>en-US</NeutralLanguage>
+    <SatelliteResourceLanguages>en-US;zh-CN;zh-TW;zh-HK;zh-MO</SatelliteResourceLanguages>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.17.2" />
+    <PackageReference Include="NetVips" Version="3.0.0" />
+    <PackageReference Include="NetVips.Native.win-x64" Version="8.18.6" />
+  </ItemGroup>
+
+
+
+  <ItemGroup><EmbeddedResource Include="DefaultApps\Native\TzipLatestHash.dll" LogicalName="TANGERINE_PhotoViewer.TzipLatestHash.dll" /></ItemGroup>
+  <ItemGroup><Resource Include="Assets\TANGERINE-PV.png" /></ItemGroup>
 </Project>

@@ -1,0 +1,266 @@
+<root>
+  <data name="AppTitle">
+    <value>TANGERINE PhotoViewer</value>
+  </data>
+  <data name="ChooseExportFolder">
+    <value>Choose a folder for GIF frames</value>
+  </data>
+  <data name="DefaultAppsDescription">
+    <value>Register this viewer and choose it for image types in Windows Default apps.</value>
+  </data>
+  <data name="ExportedFrames">
+    <value>Exported {0} frames</value>
+  </data>
+  <data name="ExportFrames">
+    <value>Export GIF frames</value>
+  </data>
+  <data name="ExportProgress">
+    <value>Exporting frames {0}%</value>
+  </data>
+  <data name="FileFilter">
+    <value>Image files|*.*</value>
+  </data>
+  <data name="GifTools">
+    <value>GIF tools</value>
+  </data>
+  <data name="MissingExecutable">
+    <value>Executable path is unavailable</value>
+  </data>
+  <data name="NotGif">
+    <value>The file is not a GIF</value>
+  </data>
+  <data name="Open">
+    <value>Open</value>
+  </data>
+  <data name="OpenDefaultApps">
+    <value>Open Windows Default apps</value>
+  </data>
+  <data name="Opened">
+    <value>Opened {0}</value>
+  </data>
+  <data name="OpeningProgress">
+    <value>Opening file {0}%</value>
+  </data>
+  <data name="OperationFailed">
+    <value>Operation failed: {0}</value>
+  </data>
+  <data name="ReadingProgress">
+    <value>Reading image {0}%</value>
+  </data>
+  <data name="Ready">
+    <value>Ready</value>
+  </data>
+  <data name="RotateLeft">
+    <value>Rotate left 90°</value>
+  </data>
+  <data name="RotateRight">
+    <value>Rotate right 90°</value>
+  </data>
+  <data name="Stop">
+    <value>Stop work</value>
+  </data>
+  <data name="Stopped">
+    <value>Work stopped</value>
+  </data>
+  <data name="SystemOperations">
+    <value>System operations</value>
+  </data>
+  <data name="Unload">
+    <value>Unload file</value>
+  </data>
+  <data name="UnloadingProgress">
+    <value>Unloading file {0}%</value>
+  </data>
+  <data name="UnsupportedImage">
+    <value>Unsupported image file</value>
+  </data>
+  <data name="ZoomIn">
+    <value>Zoom in</value>
+  </data>
+  <data name="ZoomOut">
+    <value>Zoom out</value>
+  </data>
+  <data name="ZoomPercent">
+    <value>Zoom {0}%</value>
+  </data>
+  <data name="LargeFormatUnsupported">
+    <value>This format cannot be read by region above 100 MB.</value>
+  </data>
+  <data name="DefaultAppsExecutableMissing">
+    <value>The viewer executable is unavailable.</value>
+  </data>
+  <data name="DefaultAppsNotifyFailed">
+    <value>Could not refresh Windows associations.</value>
+  </data>
+  <data name="DefaultAppsUnsupported">
+    <value>Default apps require Windows 10 or newer.</value>
+  </data>
+  <data name="DefaultAppsLatestWriteFailed">
+    <value>Could not write the current Windows association.</value>
+  </data>
+  <data name="DefaultAppsLatestRollbackFailed">
+    <value>Could not restore the previous Windows association.</value>
+  </data>
+  <data name="DefaultAppsLatestUnsupported">
+    <value>This Windows association format is unsupported.</value>
+  </data>
+  <data name="DefaultAppsAutomaticRejected">
+    <value>Windows did not accept the default selection.</value>
+  </data>
+  <data name="DefaultAppsLatestHashFailed">
+    <value>Could not calculate the current Windows association hash.</value>
+  </data>
+  <data name="DefaultAppsApplicationDescription">
+    <value>View images with TANGERINE PhotoViewer</value>
+  </data>
+  <data name="DefaultAppsAutomaticWriteFailed">
+    <value>Could not write the default selection.</value>
+  </data>
+  <data name="DefaultAppsVersionFallback">
+    <value>Could not read the Windows revision; using the general settings page.</value>
+  </data>
+  <data name="DefaultAppsRegistrationBusy">
+    <value>Another association operation is running.</value>
+  </data>
+  <data name="DefaultAppsAutomaticRollbackFailed">
+    <value>Could not restore the prior default selection.</value>
+  </data>
+  <data name="DefaultAppsRollbackFailed">
+    <value>Could not restore the prior registration.</value>
+  </data>
+  <data name="DefaultAppsQueryFailed">
+    <value>Could not verify the current default app.</value>
+  </data>
+  <data name="DefaultAppsLatestRejected">
+    <value>Windows rejected the default selection.</value>
+  </data>
+  <data name="DefaultAppsRegistrationFailed">
+    <value>Could not register this viewer.</value>
+  </data>
+  <data name="DefaultAppsAutomaticUnsupported">
+    <value>Automatic default selection is unavailable on this Windows version.</value>
+  </data>
+  <data name="DefaultAppsLaunchFailed">
+    <value>Could not open Windows Default apps.</value>
+  </data>
+  <data name="DefaultAppsHashFailed">
+    <value>Could not calculate the Windows association hash.</value>
+  </data>
+  <data name="DefaultAppsLaunchFallback">
+    <value>Opened the general Default apps page.</value>
+  </data>
+  <data name="DefaultAppsCompleted">
+    <value>Selected formats now use this viewer.</value>
+  </data>
+  <data name="DefaultAppsWait">
+    <value>Finishing association work before closing...</value>
+  </data>
+  <data name="DefaultAppsSettingsOpened">
+    <value>Windows Default apps is open.</value>
+  </data>
+  <data name="DefaultAppsProgress">
+    <value>Processing {0}/{1}: {2}</value>
+  </data>
+  <data name="DefaultAppsChooseFormats">
+    <value>Select at least one format.</value>
+  </data>
+  <data name="DefaultAppsUseThisApp">
+    <value>Set this viewer as default</value>
+  </data>
+  <data name="ImageDetails">
+    <value>View details</value>
+  </data>
+  <data name="DetailsResolutionValue">
+    <value>{0} × {1} pixels</value>
+  </data>
+  <data name="DetailsResolution">
+    <value>Resolution</value>
+  </data>
+  <data name="DetailsFormat">
+    <value>Format</value>
+  </data>
+  <data name="DetailsFileSizeValue">
+    <value>{0:N0} bytes ({1:N2} MiB)</value>
+  </data>
+  <data name="DetailsName">
+    <value>Name</value>
+  </data>
+  <data name="DetailsFileSize">
+    <value>File size</value>
+  </data>
+  <data name="UnknownFormat">
+    <value>Unknown</value>
+  </data>
+  <data name="DetailsPath">
+    <value>Path</value>
+  </data>
+  <data name="DetailsRow">
+    <value>{0}: {1}</value>
+  </data>
+  <data name="DefaultAppsUnregisterFormatRemoved">
+    <value>Removed registration for {0}.</value>
+  </data>
+  <data name="DefaultAppsUnregisterRegistrationFailed">
+    <value>Could not remove all registrations.</value>
+  </data>
+  <data name="DefaultAppsUnregisterStillDefault">
+    <value>This viewer is still the effective default.</value>
+  </data>
+  <data name="DefaultAppsUnregisterBusy">
+    <value>Another association operation is running.</value>
+  </data>
+  <data name="DefaultAppsUnregisterAll">
+    <value>Cancel all defaults and unregister</value>
+  </data>
+  <data name="DefaultAppsSelectAll">
+    <value>Select all</value>
+  </data>
+  <data name="DefaultAppsSelectNone">
+    <value>Select none</value>
+  </data>
+  <data name="DefaultAppsUnregisterRollbackFailed">
+    <value>Could not restore a previous association.</value>
+  </data>
+  <data name="DefaultAppsUnregisterFormatFailed">
+    <value>Failed to remove {0}: {1}</value>
+  </data>
+  <data name="DefaultAppsUnregisterChoiceCleared">
+    <value>Cleared default choice for {0}.</value>
+  </data>
+  <data name="DefaultAppsUnregisterWorking">
+    <value>Removing this viewer default associations...</value>
+  </data>
+  <data name="DefaultAppsUnregisterCompleted">
+    <value>Removed {0} image associations.</value>
+  </data>
+  <data name="DefaultAppsUnregisterChoiceFailed">
+    <value>Could not clear all default choices.</value>
+  </data>
+  <data name="DefaultAppsUnregisterRenameFailed">
+    <value>Could not rename registry key {0}.</value>
+  </data>
+  <data name="DefaultAppsUnregisterUnknownAssociations">
+    <value>Unknown file associations remain in this viewer registration.</value>
+  </data>
+  <data name="DefaultAppsUnregisterOwnershipChanged">
+    <value>Registration ownership changed: {0}</value>
+  </data>
+  <data name="NavigatorMaximum">
+    <value>Navigator reached maximum size (1/4 of preview area).</value>
+  </data>
+  <data name="NavigatorMinimum">
+    <value>Navigator reached minimum size (1/200 of preview area).</value>
+  </data>
+  <data name="NextImage">
+    <value>Next image</value>
+  </data>
+  <data name="PreviousImageSymbol">
+    <value>◀</value>
+  </data>
+  <data name="PreviousImage">
+    <value>Previous image</value>
+  </data>
+  <data name="NextImageSymbol">
+    <value>▶</value>
+  </data>
+</root>
