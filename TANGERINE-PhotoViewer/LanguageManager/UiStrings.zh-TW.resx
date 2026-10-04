@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <data name="AppTitle">
     <value>橘子圖片檢視器</value>
@@ -262,5 +263,47 @@
   </data>
   <data name="NextImageSymbol">
     <value>▶</value>
+  </data>
+  <data name="LargePreviewOnly">
+    <value>图片区域太大，暂时显示预览图。请继续放大后查看清晰区域。</value>
+  </data>
+  <data name="LargeRegionPreviewOnly">
+    <value>此文件不支持快速区域读取；继续显示可放大的预览图。</value>
+  </data>
+  <data name="ReadingRegionPreparing">
+    <value>正在准备读取可见区域…</value>
+  </data>
+  <data name="PreparingImageCacheProgress">
+    <value>正在准备大图缓存 {0}%</value>
+  </data>
+  <data name="ImageCacheReady">
+    <value>大图缓存已就绪。</value>
+  </data>
+  <data name="PreparingImageCache">
+    <value>正在准备大图缓存…</value>
+  </data>
+  <data name="About">
+    <value>关于</value>
+  </data>
+  <data name="AboutProduct">
+    <value>TPV(TANGERINE Photo Viewer)</value>
+  </data>
+  <data name="AboutThanks">
+    <value>Thanks all of contributors</value>
+  </data>
+  <data name="AboutFounder">
+    <value>Found:xiaoxiaoSean</value>
+  </data>
+  <data name="AboutVersion">
+    <value>Version:{0}</value>
+  </data>
+  <data name="AboutProjectLink">
+    <value>Project Link:{0}</value>
+  </data>
+  <data name="AboutProjectUrl">
+    <value>https://github.com/xiaoxiaoSean/TANGERINE-PhotoViewer</value>
+  </data>
+  <data name="UnknownVersion">
+    <value>未知</value>
   </data>
 </root>

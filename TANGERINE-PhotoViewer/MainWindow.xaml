@@ -16,6 +16,7 @@
       <MenuItem x:Name="UnloadItem" Click="Unload_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="StopItem" Click="Stop_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="SystemItem" Click="System_Click"/>
+      <MenuItem x:Name="AboutItem" Click="About_Click"/>
     </Menu>
     <Grid DockPanel.Dock="Bottom" Background="Black">
       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

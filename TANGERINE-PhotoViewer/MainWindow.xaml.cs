@@ -15,6 +15,7 @@ public partial class MainWindow : Window
 {
     private const long LargeFileBytes = 100L * 1024 * 1024;
     private CancellationTokenSource? operation;
+    private readonly Dictionary<CancellationToken, CancellationTokenSource> activeOperations = new();
     private long generation;
     private bool stopRequested;
     private bool renderSuspended;
@@ -23,6 +24,11 @@ public partial class MainWindow : Window
     private BitmapSource? source;
     private bool isGif;
     private bool large;
+    private bool fastRegionAccess;
+    private string? preparedRegionPath;
+    private CancellationTokenSource? cachePreparation;
+    private bool cachePreparationStopped;
+    private bool cachePreparationFailed;
     private int imageWidth;
     private int imageHeight;
     private long fileSize;
@@ -39,6 +45,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? directoryScan;
     private long directoryScanGeneration;
     private readonly DispatcherTimer renderDelay = new() { Interval = TimeSpan.FromMilliseconds(90) };
+    private readonly SemaphoreSlim regionDecodeGate = new(1, 1);
     private readonly DispatcherTimer navigatorLimitDelay = new() { Interval = TimeSpan.FromSeconds(2) };
 
     private int? displayedZoomPercent;
@@ -56,6 +63,16 @@ public partial class MainWindow : Window
         HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(WheelHook);
         if (Environment.GetCommandLineArgs().Skip(1).FirstOrDefault() is { } file)
             _ = OpenAsync(file);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        renderDelay.Stop();
+        operation?.Cancel();
+        CancelDirectoryScan();
+        CancelCachePreparation();
+        if (preparedRegionPath is { } cachePath) _ = DeleteCacheWhenIdleAsync(cachePath);
+        base.OnClosed(e);
     }
 
     private IntPtr WheelHook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -90,6 +107,7 @@ public partial class MainWindow : Window
         UnloadItem.Header = LanguageManager.Get("Unload");
         StopItem.Header = LanguageManager.Get("Stop");
         SystemItem.Header = LanguageManager.Get("SystemOperations");
+        AboutItem.Header = LanguageManager.Get("About");
         PreviousImageButton.Content = LanguageManager.Get("PreviousImageSymbol");
         NextImageButton.Content = LanguageManager.Get("NextImageSymbol");
         PreviousImageButton.ToolTip = LanguageManager.Get("PreviousImage");
@@ -108,6 +126,7 @@ public partial class MainWindow : Window
             item.Visibility = loaded ? Visibility.Visible : Visibility.Collapsed;
         GifItem.Visibility = loaded && isGif ? Visibility.Visible : Visibility.Collapsed;
         StopItem.Visibility = operation is not null || directoryScan is not null || gifWindow?.IsWorking == true
+            || cachePreparation is not null
             ? Visibility.Visible : Visibility.Collapsed;
         UpdateNavigationButtons();
     }
@@ -116,6 +135,7 @@ public partial class MainWindow : Window
     {
         operation?.Cancel();
         operation = new CancellationTokenSource();
+        activeOperations[operation.Token] = operation;
         stopRequested = false;
         generation++;
 
@@ -125,9 +145,8 @@ public partial class MainWindow : Window
 
     private void EndWork(CancellationToken token)
     {
-        if (operation?.Token != token) return;
-        operation.Dispose();
-        operation = null;
+        if (operation?.Token == token) operation = null;
+        if (activeOperations.Remove(token, out var finished)) finished.Dispose();
 
         RefreshMenu();
     }
@@ -148,21 +167,33 @@ public partial class MainWindow : Window
     {
         renderDelay.Stop();
         CancelDirectoryScan();
+        CancelCachePreparation();
         renderSuspended = true;
         var token = BeginWork();
         var workGeneration = generation;
-        var previous = (path, source, isGif, large, imageWidth, imageHeight, fileSize, imageFormat, scale, rotation, Photo.Source, Preview.Source, Photo.Width, Photo.Height, Surface.Width, Surface.Height);
+        var previous = (path, source, isGif, large, fastRegionAccess, imageWidth, imageHeight, fileSize,
+            imageFormat, scale, rotation, preparedRegionPath, Photo.Source, Preview.Source,
+            Photo.Width, Photo.Height, Surface.Width, Surface.Height);
         try
         {
             ShowProgress("OpeningProgress");
             var progress = new Progress<int>(value => { if (workGeneration == generation && !token.IsCancellationRequested) StatusLabel.Content = string.Format(LanguageManager.Get("OpeningProgress"), value); });
-            var result = await Task.Run(() => NativeWork.Run(() => ImageLoader.Load(file, LargeFileBytes, token, progress), token), token);
+            var dpi = VisualTreeHelper.GetDpi(Viewer);
+            var previewWidth = Math.Max(1, (int)Math.Ceiling(Viewer.ActualWidth * dpi.DpiScaleX));
+            var previewHeight = Math.Max(1, (int)Math.Ceiling(Viewer.ActualHeight * dpi.DpiScaleY));
+            var result = await Task.Run(() => NativeWork.Run(() => ImageLoader.Load(
+                file, LargeFileBytes, previewWidth, previewHeight, token, progress), token), token);
             token.ThrowIfCancellationRequested();
             if (workGeneration != generation) return;
+            if (preparedRegionPath is { } oldCache) _ = DeleteCacheWhenIdleAsync(oldCache);
+            preparedRegionPath = null;
+            cachePreparationStopped = false;
+            cachePreparationFailed = false;
             path = file;
             source = result.Image;
             isGif = result.IsGif;
             large = result.IsLarge;
+            fastRegionAccess = result.FastRegionAccess;
             imageWidth = result.PixelWidth;
             imageHeight = result.PixelHeight;
             fileSize = result.FileSize;
@@ -209,12 +240,15 @@ public partial class MainWindow : Window
         }
     }
 
-    private void Restore((string? Path, BitmapSource? Source, bool Gif, bool Large, int Width, int Height,
-        long FileSize, string Format, double Scale, int Rotation, System.Windows.Media.ImageSource? PhotoSource, System.Windows.Media.ImageSource? PreviewSource,
+    private void Restore((string? Path, BitmapSource? Source, bool Gif, bool Large, bool FastRegionAccess, int Width, int Height,
+        long FileSize, string Format, double Scale, int Rotation, string? CachePath,
+        System.Windows.Media.ImageSource? PhotoSource, System.Windows.Media.ImageSource? PreviewSource,
         double PhotoWidth, double PhotoHeight, double SurfaceWidth, double SurfaceHeight) old)
     {
-        (path, source, isGif, large, imageWidth, imageHeight, fileSize, imageFormat, scale, rotation) =
-            (old.Path, old.Source, old.Gif, old.Large, old.Width, old.Height, old.FileSize, old.Format, old.Scale, old.Rotation);
+        (path, source, isGif, large, fastRegionAccess, imageWidth, imageHeight, fileSize, imageFormat, scale, rotation) =
+            (old.Path, old.Source, old.Gif, old.Large, old.FastRegionAccess, old.Width, old.Height,
+                old.FileSize, old.Format, old.Scale, old.Rotation);
+        preparedRegionPath = old.CachePath;
         Photo.Source = old.PhotoSource;
         Preview.Source = old.PreviewSource;
         Photo.Width = old.PhotoWidth; Photo.Height = old.PhotoHeight;
@@ -235,8 +269,13 @@ public partial class MainWindow : Window
             token.ThrowIfCancellationRequested();
             if (workGeneration != generation) return;
             renderDelay.Stop();
-            path = null; source = null; isGif = false; large = false; rotation = 0; scale = 1;
+            path = null; source = null; isGif = false; large = false; fastRegionAccess = false; rotation = 0; scale = 1;
             CancelDirectoryScan();
+            CancelCachePreparation();
+            if (preparedRegionPath is { } oldCache) _ = DeleteCacheWhenIdleAsync(oldCache);
+            preparedRegionPath = null;
+            cachePreparationStopped = false;
+            cachePreparationFailed = false;
             neighboringImages = [];
             fileSize = 0; imageFormat = string.Empty;
             Photo.Source = null; Preview.Source = null; Surface.Width = 0; Surface.Height = 0;
@@ -255,6 +294,8 @@ public partial class MainWindow : Window
         stopRequested = true;
         operation?.Cancel();
         CancelDirectoryScan();
+        cachePreparationStopped = true;
+        CancelCachePreparation();
         gifWindow?.StopWork();
 
         renderDelay.Stop();
@@ -722,29 +763,144 @@ public partial class MainWindow : Window
     private void Window_KeyUp(object sender, KeyEventArgs e) => UpdateZoomLabel();
     private void Window_Deactivated(object? sender, EventArgs e) => ZoomLabel.Visibility = Visibility.Collapsed;
 
-    private void QueueRender() { renderDelay.Stop(); renderDelay.Start(); }
+    private void QueueRender()
+    {
+        renderDelay.Stop();
+        if (!large || source is null) return;
+        if (scale <= MinimumScale() * 1.00001)
+        {
+            operation?.Cancel();
+            Photo.Source = null;
+            return;
+        }
+        if (!fastRegionAccess)
+        {
+            if (preparedRegionPath is null)
+            {
+                Photo.Source = null;
+                if (path is not null && cachePreparation is null && !cachePreparationStopped && !cachePreparationFailed)
+                    _ = PrepareCacheAsync(path);
+                return;
+            }
+        }
+        renderDelay.Start();
+    }
+
+    private void CancelCachePreparation()
+    {
+        cachePreparation?.Cancel();
+        cachePreparation = null;
+        RefreshMenu();
+    }
+
+    private async Task DeleteCacheWhenIdleAsync(string cachePath)
+    {
+        await regionDecodeGate.WaitAsync();
+        try
+        {
+            if (File.Exists(cachePath)) File.Delete(cachePath);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        finally { regionDecodeGate.Release(); }
+    }
+
+    private async Task PrepareCacheAsync(string file)
+    {
+        var work = new CancellationTokenSource();
+        cachePreparation = work;
+        var cachePath = Path.Combine(Path.GetTempPath(), "TangerinePhotoViewer",
+            "ImageCache", Guid.NewGuid().ToString("N") + ".tif");
+        RefreshMenu();
+        try
+        {
+            StatusLabel.Content = LanguageManager.Get("PreparingImageCache");
+            var progress = new Progress<int>(value =>
+            {
+                if (ReferenceEquals(cachePreparation, work) && !work.IsCancellationRequested && value > 0)
+                    StatusLabel.Content = string.Format(LanguageManager.Get("PreparingImageCacheProgress"), value);
+            });
+            await Task.Run(() =>
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+                ImageLoader.PrepareRandomAccessCache(file, cachePath, work.Token, progress);
+            }, work.Token);
+            work.Token.ThrowIfCancellationRequested();
+            if (!ReferenceEquals(cachePreparation, work) || path != file) return;
+            preparedRegionPath = cachePath;
+            StatusLabel.Content = LanguageManager.Get("ImageCacheReady");
+            QueueRender();
+        }
+        catch (OperationCanceledException)
+        {
+            if (ReferenceEquals(cachePreparation, work)) StatusLabel.Content = LanguageManager.Get("Stopped");
+        }
+        catch (Exception ex)
+        {
+            if (ReferenceEquals(cachePreparation, work))
+            {
+                cachePreparationFailed = true;
+                StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), ex.Message);
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(cachePreparation, work)) cachePreparation = null;
+            if (cachePath != preparedRegionPath)
+                try { if (File.Exists(cachePath)) File.Delete(cachePath); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            work.Dispose();
+            RefreshMenu();
+        }
+    }
 
     private async Task RenderAsync()
     {
-        if (!large || path is null || source is null) return;
+        if (!large || path is null || source is null || scale <= MinimumScale() * 1.00001 ||
+            (!fastRegionAccess && preparedRegionPath is null)) return;
         var file = path;
+        var decodePath = fastRegionAccess ? file : preparedRegionPath!;
         var token = BeginWork();
         var workGeneration = generation;
         try
         {
-            ShowProgress("ReadingProgress");
-            var viewX = Math.Max(0, (int)(Viewer.HorizontalOffset / scale));
-            var viewY = Math.Max(0, (int)(Viewer.VerticalOffset / scale));
-            var viewWidth = Math.Min(rotation is 90 or 270 ? imageHeight : imageWidth, Math.Max(1, (int)(Viewer.ViewportWidth / scale) + 2));
-            var viewHeight = Math.Min(rotation is 90 or 270 ? imageWidth : imageHeight, Math.Max(1, (int)(Viewer.ViewportHeight / scale) + 2));
+            StatusLabel.Content = LanguageManager.Get("ReadingRegionPreparing");
+            var fullWidth = rotation is 90 or 270 ? imageHeight : imageWidth;
+            var fullHeight = rotation is 90 or 270 ? imageWidth : imageHeight;
+            var viewX = Math.Clamp((int)(Viewer.HorizontalOffset / scale), 0, fullWidth - 1);
+            var viewY = Math.Clamp((int)(Viewer.VerticalOffset / scale), 0, fullHeight - 1);
+            var viewWidth = Math.Min(fullWidth - viewX, Math.Max(1, (int)Math.Min(int.MaxValue - 2d,
+                Math.Ceiling(Viewer.ViewportWidth / scale)) + 2));
+            var viewHeight = Math.Min(fullHeight - viewY, Math.Max(1, (int)Math.Min(int.MaxValue - 2d,
+                Math.Ceiling(Viewer.ViewportHeight / scale)) + 2));
             var viewport = new Int32Rect(viewX, viewY, viewWidth, viewHeight);
             var angle = rotation;
             var displayScale = scale;
-            var progress = new Progress<int>(value => { if (workGeneration == generation && !token.IsCancellationRequested) StatusLabel.Content = string.Format(LanguageManager.Get("ReadingProgress"), value); });
-            var tile = await Task.Run(() => NativeWork.Run(() => ImageLoader.LoadRegion(file, viewport, angle, displayScale, token, progress), token), token);
+            var progress = new Progress<int>(value =>
+            {
+                if (value > 0 && workGeneration == generation && !token.IsCancellationRequested)
+                    StatusLabel.Content = string.Format(LanguageManager.Get("ReadingProgress"), value);
+            });
+            BitmapSource? tile;
+            await regionDecodeGate.WaitAsync(token);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                tile = await ImageLoader.LoadRegionParallelAsync(decodePath, viewport, angle, displayScale, token, progress);
+            }
+            finally { regionDecodeGate.Release(); }
             token.ThrowIfCancellationRequested();
-            if (workGeneration != generation || file != path) return;
+            if (workGeneration != generation || file != path || angle != rotation ||
+                (!fastRegionAccess && decodePath != preparedRegionPath) ||
+                Math.Abs(displayScale - scale) > 0.0000001 || scale <= MinimumScale() * 1.00001) return;
             if (stopRequested) return;
+            if (tile is null)
+            {
+                Photo.Source = null;
+                StatusLabel.Content = LanguageManager.Get("LargePreviewOnly");
+                return;
+            }
             renderSuspended = true;
             try
             {
@@ -780,4 +936,5 @@ public partial class MainWindow : Window
         window.Show();
     }
     private void System_Click(object sender, RoutedEventArgs e) => new SystemWindow { Owner = this }.Show();
+    private void About_Click(object sender, RoutedEventArgs e) => new AboutWindow { Owner = this }.ShowDialog();
 }

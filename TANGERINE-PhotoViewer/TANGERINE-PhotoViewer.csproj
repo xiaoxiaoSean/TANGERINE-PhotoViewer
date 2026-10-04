@@ -3,6 +3,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
+    <Version>1.0.0</Version>
     <RootNamespace>TANGERINE_PhotoViewer</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -21,5 +22,6 @@
 
 
   <ItemGroup><EmbeddedResource Include="DefaultApps\Native\TzipLatestHash.dll" LogicalName="TANGERINE_PhotoViewer.TzipLatestHash.dll" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Assets\TPV_Photo.ico" LogicalName="TANGERINE_PhotoViewer.TPV_Photo.ico" /></ItemGroup>
   <ItemGroup><Resource Include="Assets\TANGERINE-PV.png" /></ItemGroup>
 </Project>

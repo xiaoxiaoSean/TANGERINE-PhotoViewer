@@ -2,6 +2,7 @@ using System.IO;
 using Microsoft.Win32;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 
@@ -18,6 +19,7 @@ internal sealed record DefaultSettingsLaunch(string Uri, IReadOnlyList<StageExce
 internal static class DefaultAppAssociationService
 {
     internal const string RegisteredApplicationName = "TANGERINE PhotoViewer";
+    private const string FileIconResource = "TANGERINE_PhotoViewer.TPV_Photo.ico";
     private const string CapabilitiesPath = @"Software\TangerinePhotoViewer\DefaultApps\Capabilities";
 
     // Extensions are association labels only; image decoding inspects file content.
@@ -87,7 +89,7 @@ internal static class DefaultAppAssociationService
     {
         string progId = GetProgId(extension);
         string handler = @"Software\Classes\" + progId;
-        // The executable provides the application and file icon.
+        // Keep the document icon separate from the application's executable icon.
         string fileIcon = $"\"{fileIconPath}\",0";
         string applicationIcon = $"\"{executablePath}\",0";
         return new AssociationRegistrationValue[]
@@ -135,10 +137,8 @@ internal static class DefaultAppAssociationService
             {
                 throw new StageException("DEFAS0009", LanguageManager.Get("DefaultAppsRegistrationBusy"), exception); //DEFAS0009
             }
-            // Finish extracting and verifying the icon before touching registry
-            // values. This also repairs a missing/damaged cache file when the user
-            // reruns the flow for an extension that already defaults to this app.
-            string fileIconPath = executablePath;
+            // Finish extracting and verifying the icon before touching registry values.
+            string fileIconPath = EnsureFileIcon();
             ApplyRegistrationPlan(Registry.CurrentUser, BuildRegistrationPlan(extension, executablePath, fileIconPath));
             try
             {
@@ -158,6 +158,31 @@ internal static class DefaultAppAssociationService
             if (acquired) gate!.ReleaseMutex();
             gate?.Dispose();
         }
+    }
+
+    private static string EnsureFileIcon()
+    {
+        using Stream source = typeof(DefaultAppAssociationService).Assembly.GetManifestResourceStream(FileIconResource)
+            ?? throw new FileNotFoundException(FileIconResource);
+        using MemoryStream memory = new();
+        source.CopyTo(memory);
+        byte[] bytes = memory.ToArray();
+        string hash = Convert.ToHexString(SHA256.HashData(bytes));
+        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "TangerinePhotoViewer", "Icons");
+        Directory.CreateDirectory(directory);
+        string iconPath = Path.Combine(directory, "TPV_Photo_" + hash + ".ico");
+        if (File.Exists(iconPath) && SHA256.HashData(File.ReadAllBytes(iconPath)).AsSpan().SequenceEqual(
+                SHA256.HashData(bytes))) return iconPath;
+
+        string temporaryPath = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            File.WriteAllBytes(temporaryPath, bytes);
+            File.Move(temporaryPath, iconPath, overwrite: true);
+        }
+        finally { if (File.Exists(temporaryPath)) File.Delete(temporaryPath); }
+        return iconPath;
     }
 
     // Accept a registry root so the journal can also be exercised under an isolated
