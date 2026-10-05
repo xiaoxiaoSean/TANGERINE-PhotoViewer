@@ -48,3 +48,4 @@
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
 TPV-out/sc/TANGERINE-PhotoViewer.exe filter=lfs diff=lfs merge=lfs -text
+TPV-out/sc/TPV-v1.0.0-sc.exe filter=lfs diff=lfs merge=lfs -text
