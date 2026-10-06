@@ -306,4 +306,121 @@
   <data name="UnknownVersion">
     <value>Unknown</value>
   </data>
+  <data name="Notes">
+    <value>Notes</value>
+  </data>
+  <data name="Brush">
+    <value>Brush</value>
+  </data>
+  <data name="BrushEraser">
+    <value>Brush eraser</value>
+  </data>
+  <data name="SaveAs">
+    <value>Save as</value>
+  </data>
+  <data name="EditingDocumentWithTool">
+    <value>You are editing the document with {0}</value>
+  </data>
+  <data name="SwitchTool">
+    <value>Switch tool</value>
+  </data>
+  <data name="ExitEditMode">
+    <value>Exit edit mode</value>
+  </data>
+  <data name="EditedUnsaved">
+    <value>Current image has been edited but not saved.</value>
+  </data>
+  <data name="BrushInUse">
+    <value>The “Brush” tool is in use.</value>
+  </data>
+  <data name="EraserInUse">
+    <value>The “Brush eraser” tool is in use.</value>
+  </data>
+  <data name="BrushOptionsTitle">
+    <value>Brush options</value>
+  </data>
+  <data name="EraserOptionsTitle">
+    <value>Brush eraser options</value>
+  </data>
+  <data name="BrushColor">
+    <value>Brush color</value>
+  </data>
+  <data name="BrushRadius">
+    <value>Brush diameter</value>
+  </data>
+  <data name="EraserRadius">
+    <value>Eraser diameter</value>
+  </data>
+  <data name="SaveAsFilter">
+    <value>PNG image|*.png</value>
+  </data>
+  <data name="SavedAs">
+    <value>Saved as: {0}</value>
+  </data>
+  <data name="SaveFailed">
+    <value>Save failed: {0}</value>
+  </data>
+  <data name="EditUnavailable">
+    <value>No editable image is loaded.</value>
+  </data>
+  <data name="SaveAsProgress">
+    <value>Saving full-resolution image… {0}%</value>
+  </data>
+  <data name="SaveAsComplete">
+    <value>Saved full-resolution image: {0}</value>
+  </data>
+  <data name="RadiusPreview">
+    <value>Diameter preview: {0} px</value>
+  </data>
+  <data name="BrushPixelStatus">
+    <value>Current stroke diameter: {0} display px, {1} image px</value>
+  </data>
+  <data name="DisplayMetricsUnavailable">
+    <value>Unable to get the current display pixel dimensions.</value>
+  </data>
+  <data name="DiameterRange">
+    <value>{0} px-{1} px</value>
+  </data>
+  <data name="SaveAsOriginalFilter">
+    <value>Original format (*.{0})|*.{0}|PNG image|*.png</value>
+  </data>
+  <data name="SaveAsPngFilter">
+    <value>PNG image|*.png</value>
+  </data>
+  <data name="EditingUnmodified">
+    <value>Editing document; no unsaved notes.</value>
+  </data>
+  <data name="EditedSaved">
+    <value>Current image notes were saved.</value>
+  </data>
+  <data name="BrushRed">
+    <value>Red</value>
+  </data>
+  <data name="BrushGreen">
+    <value>Green</value>
+  </data>
+  <data name="BrushBlue">
+    <value>Blue</value>
+  </data>
+  <data name="Apply">
+    <value>Apply</value>
+  </data>
+  <data name="Cancel">
+    <value>Cancel</value>
+  </data>
+  <data name="SaveAsCannotOverwriteOriginal">
+    <value>Save as must use a different path from the original image.</value>
+  </data>
+  <data name="AnnotationExportUnsupported">
+    <value>The original output format cannot be encoded. Choose PNG.</value>
+  </data>
+  <data name="AnnotationExportInvalid">
+    <value>The image, destination, or stroke data is invalid.</value>
+  </data>
+  <data name="AnnotationExportFailed">
+    <value>The annotated image could not be saved.</value>
+  </data>
+  <data name="AnnotationExportVerificationFailed">
+    <value>The saved image failed verification.</value>
+  </data>
 </root>

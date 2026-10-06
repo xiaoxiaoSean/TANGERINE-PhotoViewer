@@ -306,4 +306,121 @@
   <data name="UnknownVersion">
     <value>未知</value>
   </data>
+  <data name="Notes">
+    <value>筆記</value>
+  </data>
+  <data name="Brush">
+    <value>畫筆</value>
+  </data>
+  <data name="BrushEraser">
+    <value>畫筆橡皮擦</value>
+  </data>
+  <data name="SaveAs">
+    <value>另存新檔</value>
+  </data>
+  <data name="EditingDocumentWithTool">
+    <value>你正在編輯文件，正在使用{0}</value>
+  </data>
+  <data name="SwitchTool">
+    <value>切換工具</value>
+  </data>
+  <data name="ExitEditMode">
+    <value>退出編輯模式</value>
+  </data>
+  <data name="EditedUnsaved">
+    <value>目前圖片已編輯，但尚未儲存。</value>
+  </data>
+  <data name="BrushInUse">
+    <value>「畫筆」工具正在使用中。</value>
+  </data>
+  <data name="EraserInUse">
+    <value>「畫筆橡皮擦」工具正在使用中。</value>
+  </data>
+  <data name="BrushOptionsTitle">
+    <value>畫筆選項</value>
+  </data>
+  <data name="EraserOptionsTitle">
+    <value>畫筆橡皮擦選項</value>
+  </data>
+  <data name="BrushColor">
+    <value>畫筆顏色</value>
+  </data>
+  <data name="BrushRadius">
+    <value>畫筆直徑</value>
+  </data>
+  <data name="EraserRadius">
+    <value>橡皮擦直徑</value>
+  </data>
+  <data name="SaveAsFilter">
+    <value>PNG 圖片|*.png</value>
+  </data>
+  <data name="SavedAs">
+    <value>已另存新檔：{0}</value>
+  </data>
+  <data name="SaveFailed">
+    <value>儲存失敗：{0}</value>
+  </data>
+  <data name="EditUnavailable">
+    <value>目前沒有可編輯的圖片。</value>
+  </data>
+  <data name="SaveAsProgress">
+    <value>正在儲存完整解像度圖片… {0}%</value>
+  </data>
+  <data name="SaveAsComplete">
+    <value>完整解像度圖片已儲存：{0}</value>
+  </data>
+  <data name="RadiusPreview">
+    <value>直徑預覽：{0} 像素</value>
+  </data>
+  <data name="BrushPixelStatus">
+    <value>目前筆畫的像素為{0}像素，在圖片中為{1}像素</value>
+  </data>
+  <data name="DisplayMetricsUnavailable">
+    <value>無法取得目前顯示器的像素尺寸。</value>
+  </data>
+  <data name="DiameterRange">
+    <value>{0}像素-{1}像素</value>
+  </data>
+  <data name="SaveAsOriginalFilter">
+    <value>原始格式 (*.{0})|*.{0}|PNG 圖片|*.png</value>
+  </data>
+  <data name="SaveAsPngFilter">
+    <value>PNG 圖片|*.png</value>
+  </data>
+  <data name="EditingUnmodified">
+    <value>正在編輯文件；沒有未儲存的筆記。</value>
+  </data>
+  <data name="EditedSaved">
+    <value>目前圖片的筆記已儲存。</value>
+  </data>
+  <data name="BrushRed">
+    <value>紅色</value>
+  </data>
+  <data name="BrushGreen">
+    <value>綠色</value>
+  </data>
+  <data name="BrushBlue">
+    <value>藍色</value>
+  </data>
+  <data name="Apply">
+    <value>套用</value>
+  </data>
+  <data name="Cancel">
+    <value>取消</value>
+  </data>
+  <data name="SaveAsCannotOverwriteOriginal">
+    <value>另存新檔的路徑不可與原本圖片相同。</value>
+  </data>
+  <data name="AnnotationExportUnsupported">
+    <value>無法編碼原本格式，請選擇 PNG。</value>
+  </data>
+  <data name="AnnotationExportInvalid">
+    <value>圖片、儲存位置或筆跡資料無效。</value>
+  </data>
+  <data name="AnnotationExportFailed">
+    <value>無法儲存含筆記的圖片。</value>
+  </data>
+  <data name="AnnotationExportVerificationFailed">
+    <value>儲存後的圖片驗證失敗。</value>
+  </data>
 </root>

@@ -46,7 +46,7 @@
 
 **思路：** 所有缩放入口共用 `SetScale`，并尽可能保持鼠标所在图片位置在缩放前后不变。打开图片后自动设置为当前视口的最小倍率。
 
-**原理：** `MinimumScale()` 根据图片当前旋转后的宽高与 `Viewer` 可用宽高求适合视口的倍率，上限为 1；`Zoom()` 把倍率限制在该最小值和 `Math.Max(64, MinimumScale())` 之间。`SetScale()` 用 `(滚动偏移 + 锚点) × 新倍率 / 旧倍率 − 锚点` 算出新滚动偏移；鼠标滚轮缩放传入鼠标位置，其余入口默认以视口中心为锚点。`Rotate()` 以 90 度为单位更新旋转角，随后更新图片几何尺寸、鸟览图和大图局部渲染。
+**原理：** `MinimumScale()` 根据图片当前旋转后的宽高与 `Viewer` 可用宽高求适合视口的倍率，上限为 1；`Zoom()` 把倍率限制在该最小值和 `Math.Max(64, MinimumScale())` 之间。`SetScale()` 用 `(滚动偏移 + 锚点) × 新倍率 / 旧倍率 − 锚点` 算出新滚动偏移；鼠标滚轮缩放传入鼠标位置，其余入口默认以视口中心为锚点。`Rotate()` 以 90 度为单位更新旋转角，随后更新图片几何尺寸、鸟瞰图和大图局部渲染。
 
 **调用：** 打开图片后菜单出现“放大”“缩小”“向左旋转 90 度”“向右旋转 90 度”。对应 `ZoomIn_Click`、`ZoomOut_Click`、`RotateLeft_Click`、`RotateRight_Click`；Ctrl+鼠标滚轮及 Ctrl+加/减键调用 `Zoom()`。当前按键处理识别 `OemPlus/Add` 与 `OemMinus/Subtract`。
 
@@ -58,21 +58,21 @@
 
 **调用：** 鼠标在图片上滚轮、按住左键拖动；按 Ctrl 加滚轮或加/减键缩放；点击/拖动底部滑块。相关事件均在 `MainWindow.xaml` 绑定到上述方法。
 
-## 7. 鸟览图
+## 7. 鸟瞰图
 
 **思路：** 高于最小倍率时显示整个图片的缩略导航图，并用框标出当前可见范围。它固定在预览区右下角，但允许调节大小。
 
-**原理：** `UpdateZoomControls()` 按倍率决定 `Navigator` 是否可见。`SetDefaultNavigatorSize()` 默认取视口宽度的 1/8、高度的 1/7；`ClampNavigatorArea()` 用面积比例把它约束在预览区面积的 1/200 到 1/4，达到限制时由 `ShowNavigatorLimit()` 在左下角短暂提示。`UpdateNavigatorImage()` 使完整缩略图保持原图宽高比；`UpdateNavigatorViewport()` 按滚动偏移画可见范围。`NavigateTo()` 把鸟览图上的点击位置换算为主图滚动位置。左上角的 `Thumb` 用于改变鸟览图尺寸。
+**原理：** `UpdateZoomControls()` 按倍率决定 `Navigator` 是否可见。`SetDefaultNavigatorSize()` 默认取视口宽度的 1/8、高度的 1/7；`ClampNavigatorArea()` 用面积比例把它约束在预览区面积的 1/200 到 1/4，达到限制时由 `ShowNavigatorLimit()` 在左下角短暂提示。`UpdateNavigatorImage()` 使完整缩略图保持原图宽高比；`UpdateNavigatorViewport()` 按滚动偏移画可见范围。`NavigateTo()` 把鸟瞰图上的点击位置换算为主图滚动位置。左上角的 `Thumb` 用于改变鸟瞰图尺寸。
 
-**调用：** 放大图片后出现鸟览图；点击或拖动鸟览图移动主图；在鸟览图上滚轮缩放主图，Ctrl+滚轮调整鸟览图大小；拖动其左上角控制点也可调整大小。
+**调用：** 放大图片后出现鸟瞰图；点击或拖动鸟瞰图移动主图；在鸟瞰图上滚轮缩放主图，Ctrl+滚轮调整鸟瞰图大小；拖动其左上角控制点也可调整大小。
 
 ## 8. 同目录图片检测和方向切换
 
-**思路：** 只有确认同目录还有其他可解码图片时，才显示左右切换按钮；扫描不阻塞打开图片。按钮随预览区尺寸变化，并尽量避开鸟览图。
+**思路：** 只有确认同目录还有其他可解码图片时，才显示左右切换按钮；扫描不阻塞打开图片。按钮随预览区尺寸变化，并尽量避开鸟瞰图。
 
-**原理：** `ScanDirectoryAsync(currentFile)` 在后台枚举同目录文件，逐个调用 `ImageLoader.CanDecode`；优先用 `NetVips` 检查图片元数据，失败时用 `MagickImageInfo`，不根据后缀判断。扫描结果按当前文化排序。取消令牌和 `directoryScanGeneration` 防止旧扫描覆盖新图片的结果。`UpdateNavigationButtons()` 在存在其他图片时显示两个按钮：宽度=`PreviewArea.ActualWidth / 30`，高度=`PreviewArea.ActualHeight / 7`；左按钮的 x 为 0，右按钮的 x 为区域宽度减按钮宽度；两者默认顶部 y 为 `(区域高度 − 按钮高度) / 2`，因此矩形中心落在左右边中点连成的水平线上。若右按钮与鸟览图重叠，则把它移至鸟览图上方。`NavigateImageAsync(direction)` 用取模计算上一张或下一张，到目录边界后循环。
+**原理：** `ScanDirectoryAsync(currentFile)` 在后台枚举同目录文件，逐个调用 `ImageLoader.CanDecode`；优先用 `NetVips` 检查图片元数据，失败时用 `MagickImageInfo`，不根据后缀判断。扫描结果按当前文化排序。取消令牌和 `directoryScanGeneration` 防止旧扫描覆盖新图片的结果。`UpdateNavigationButtons()` 在存在其他图片时显示两个按钮：宽度=`PreviewArea.ActualWidth / 30`，高度=`PreviewArea.ActualHeight / 7`；左按钮的 x 为 0，右按钮的 x 为区域宽度减按钮宽度；两者默认顶部 y 为 `(区域高度 − 按钮高度) / 2`，因此矩形中心落在左右边中点连成的水平线上。若右按钮与鸟瞰图重叠，则把它移至鸟瞰图上方。`NavigateImageAsync(direction)` 用取模计算上一张或下一张，到目录边界后循环。
 
-**调用：** 打开图片后等待目录扫描完成，点击预览区左/右侧按钮，或按左/上方向键切上一张、右/下方向键切下一张。预览区尺寸变化触发 `PreviewArea_SizeChanged()` 重新计算位置和尺寸；鸟览图尺寸变化时也会更新按钮位置。
+**调用：** 打开图片后等待目录扫描完成，点击预览区左/右侧按钮，或按左/上方向键切上一张、右/下方向键切下一张。预览区尺寸变化触发 `PreviewArea_SizeChanged()` 重新计算位置和尺寸；鸟瞰图尺寸变化时也会更新按钮位置。
 
 ## 9. 详细信息、GIF 工具和卸载
 
@@ -80,7 +80,7 @@
 
 **GIF 工具：** `ImageLoader.IsGif` 读取文件签名而非扩展名；确认为 GIF 时显示菜单。`Gif_Click()` 打开 `GifWindow`，可选择导出目录。`GifWindow.Export_Click()` 在后台调用 `ImageLoader.ExportGif()`，由 `MagickImageCollection` 合成帧后依次写为编号 PNG，报告百分比。工具窗口与主窗口通过 `WorkStateChanged`、`ProgressChanged` 同步工作状态和进度。
 
-**卸载：** `Unload_Click()` 清除当前路径、图片源、尺寸、鸟览图、目录扫描结果，并关闭图片相关窗口；主界面重新显示启动 Logo。加载新图片成功时 `CloseImageWindows()` 也会关闭旧图片的附属窗口。
+**卸载：** `Unload_Click()` 清除当前路径、图片源、尺寸、鸟瞰图、目录扫描结果，并关闭图片相关窗口；主界面重新显示启动 Logo。加载新图片成功时 `CloseImageWindows()` 也会关闭旧图片的附属窗口。
 
 ## 10. 停止工作、异步和进度
 

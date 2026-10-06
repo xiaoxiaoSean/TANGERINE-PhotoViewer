@@ -5,22 +5,34 @@
     <Style TargetType="MenuItem"><Setter Property="Background" Value="Black"/><Setter Property="Foreground" Value="White"/></Style>
   </Window.Resources>
   <DockPanel Background="Black">
-    <Menu DockPanel.Dock="Top">
+    <Menu x:Name="TopMenu" DockPanel.Dock="Top">
       <MenuItem x:Name="OpenItem" Click="Open_Click"/>
       <MenuItem x:Name="ZoomInItem" Click="ZoomIn_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="ZoomOutItem" Click="ZoomOut_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="RotateLeftItem" Click="RotateLeft_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="RotateRightItem" Click="RotateRight_Click" Visibility="Collapsed"/>
+      <MenuItem x:Name="NotesItem" Visibility="Collapsed">
+        <MenuItem x:Name="BrushItem" Click="Brush_Click" PreviewMouseRightButtonDown="Brush_OptionsRightClick"/>
+        <MenuItem x:Name="BrushEraserItem" Click="BrushEraser_Click" PreviewMouseRightButtonDown="Eraser_OptionsRightClick"/>
+      </MenuItem>
+      <MenuItem x:Name="SaveAsItem" Click="SaveAs_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="GifItem" Click="Gif_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="DetailsItem" Click="Details_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="UnloadItem" Click="Unload_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="StopItem" Click="Stop_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="SystemItem" Click="System_Click"/>
       <MenuItem x:Name="AboutItem" Click="About_Click"/>
+      <MenuItem x:Name="EditingDocumentItem" Visibility="Collapsed"/>
+      <MenuItem x:Name="SwitchToolItem" Visibility="Collapsed">
+        <MenuItem x:Name="EditBrushItem" Click="Brush_Click" PreviewMouseRightButtonDown="Brush_OptionsRightClick"/>
+        <MenuItem x:Name="EditEraserItem" Click="BrushEraser_Click" PreviewMouseRightButtonDown="Eraser_OptionsRightClick"/>
+      </MenuItem>
+      <MenuItem x:Name="ExitEditModeItem" Click="ExitEditMode_Click" Visibility="Collapsed"/>
     </Menu>
     <Grid DockPanel.Dock="Bottom" Background="Black">
       <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <StackPanel Grid.Column="0" Orientation="Horizontal">
+        <Label x:Name="EditStatusLabel" Background="Black" Foreground="White" Visibility="Collapsed"/>
         <Label x:Name="ZoomLabel" Background="Black" Foreground="White" Visibility="Collapsed"/>
         <Label x:Name="NavigatorLimitLabel" Background="Black" Foreground="White" Visibility="Collapsed"/>
       </StackPanel>
@@ -30,7 +42,7 @@
     <Grid x:Name="PreviewArea" Background="Black" SizeChanged="PreviewArea_SizeChanged">
       <Image x:Name="EmptyLogo" Source="Assets/TANGERINE-PV.png" Stretch="Uniform" MaxWidth="320" MaxHeight="320" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
       <ScrollViewer x:Name="Viewer" Background="Transparent" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" SizeChanged="Viewer_SizeChanged" PreviewMouseWheel="Viewer_PreviewMouseWheel" PreviewMouseDown="Viewer_PreviewMouseDown" PreviewMouseMove="Viewer_PreviewMouseMove" PreviewMouseUp="Viewer_PreviewMouseUp" ScrollChanged="Viewer_ScrollChanged">
-        <Canvas x:Name="Surface" Background="Transparent"><Image x:Name="Preview" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/><Image x:Name="Photo" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/></Canvas>
+        <Canvas x:Name="Surface" Background="Transparent"><Image x:Name="Preview" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/><Image x:Name="Photo" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/><Canvas x:Name="NotesCanvas" Background="Transparent" IsHitTestVisible="False"/></Canvas>
       </ScrollViewer>
       <Border x:Name="Navigator" Background="Black" BorderBrush="White" BorderThickness="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,0" Visibility="Collapsed" PreviewMouseWheel="Navigator_PreviewMouseWheel">
         <Grid>

@@ -70,6 +70,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         renderDelay.Stop();
+        CancelNotesSave();
         operation?.Cancel();
         CancelDirectoryScan();
         CancelCachePreparation();
@@ -104,6 +105,7 @@ public partial class MainWindow : Window
         ZoomOutItem.Header = LanguageManager.Get("ZoomOut");
         RotateLeftItem.Header = LanguageManager.Get("RotateLeft");
         RotateRightItem.Header = LanguageManager.Get("RotateRight");
+        ApplyNotesText();
         GifItem.Header = LanguageManager.Get("GifTools");
         DetailsItem.Header = LanguageManager.Get("ImageDetails");
         UnloadItem.Header = LanguageManager.Get("Unload");
@@ -127,9 +129,11 @@ public partial class MainWindow : Window
         foreach (var item in new[] { ZoomInItem, ZoomOutItem, RotateLeftItem, RotateRightItem, DetailsItem, UnloadItem })
             item.Visibility = loaded ? Visibility.Visible : Visibility.Collapsed;
         GifItem.Visibility = loaded && isGif ? Visibility.Visible : Visibility.Collapsed;
-        StopItem.Visibility = operation is not null || directoryScan is not null || gifWindow?.IsWorking == true
-            || cachePreparation is not null
-            ? Visibility.Visible : Visibility.Collapsed;
+        RefreshNotesMenu(loaded);
+        if (!editingNotes)
+            StopItem.Visibility = operation is not null || directoryScan is not null || gifWindow?.IsWorking == true
+                || cachePreparation is not null || savingNotes
+                ? Visibility.Visible : Visibility.Collapsed;
         UpdateNavigationButtons();
     }
 
@@ -167,6 +171,7 @@ public partial class MainWindow : Window
 
     private async Task OpenAsync(string file)
     {
+        CancelNotesSave();
         renderDelay.Stop();
         CancelDirectoryScan();
         CancelCachePreparation();
@@ -211,6 +216,7 @@ public partial class MainWindow : Window
             Viewer.ScrollToVerticalOffset(0);
             renderSuspended = false;
             UpdateZoomLabel();
+            ResetNotesForNewImage();
             StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
             CloseImageWindows();
             _ = ScanDirectoryAsync(file);
@@ -260,6 +266,7 @@ public partial class MainWindow : Window
 
     private async void Unload_Click(object sender, RoutedEventArgs e)
     {
+        CancelNotesSave();
         var token = BeginWork();
         var workGeneration = generation;
         try
@@ -270,6 +277,7 @@ public partial class MainWindow : Window
             if (workGeneration != generation) return;
             renderDelay.Stop();
             path = null; source = null; isGif = false; large = false; fastRegionAccess = false; rotation = 0; scale = 1;
+            ResetNotesForNewImage();
             CancelDirectoryScan();
             CancelCachePreparation();
             if (preparedRegionPath is { } oldCache) _ = DeleteCacheWhenIdleAsync(oldCache);
@@ -292,6 +300,7 @@ public partial class MainWindow : Window
     private void Stop_Click(object sender, RoutedEventArgs e)
     {
         stopRequested = true;
+        CancelNotesSave();
         operation?.Cancel();
         CancelDirectoryScan();
         cachePreparationStopped = true;
@@ -368,6 +377,7 @@ public partial class MainWindow : Window
         Viewer.ScrollToVerticalOffset(targetY);
         UpdateZoomLabel();
         UpdateZoomControls();
+        UpdateNoteStatus();
         if (large) QueueRender();
     }
 
@@ -420,6 +430,7 @@ public partial class MainWindow : Window
         if (source is null) return;
         Photo.Source = large ? null : source;
         rotation = (rotation + degrees + 360) % 360;
+        RotateNotes(degrees);
         scale = Math.Max(scale, MinimumScale());
         UpdateGeometry();
         UpdateNavigatorImage();
@@ -452,6 +463,7 @@ public partial class MainWindow : Window
             Photo.Height = imageHeight * scale;
             Photo.LayoutTransform = new RotateTransform(rotation);
         }
+        UpdateNotesGeometry();
     }
 
     private void Viewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -464,19 +476,28 @@ public partial class MainWindow : Window
 
     private void Viewer_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (HandleNotesMouseDown(e)) return;
         if (e.ChangedButton != MouseButton.Left) return;
         dragPoint = e.GetPosition(Viewer);
         Viewer.CaptureMouse();
     }
     private void Viewer_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (dragPoint is not { } old || e.LeftButton != MouseButtonState.Pressed) return;
+        if (HandleNotesMouseMove(e)) return;
+        if (dragPoint is not { } old || (e.LeftButton != MouseButtonState.Pressed && e.MiddleButton != MouseButtonState.Pressed)) return;
         var current = e.GetPosition(Viewer);
         Viewer.ScrollToHorizontalOffset(Viewer.HorizontalOffset + old.X - current.X);
         Viewer.ScrollToVerticalOffset(Viewer.VerticalOffset + old.Y - current.Y);
         dragPoint = current;
     }
-    private void Viewer_PreviewMouseUp(object sender, MouseButtonEventArgs e) { dragPoint = null; Viewer.ReleaseMouseCapture(); }
+    private void Viewer_PreviewMouseUp(object sender, MouseButtonEventArgs e)
+    {
+        HandleNotesMouseUp(e);
+        if (dragPoint is null) return;
+        dragPoint = null;
+        Viewer.ReleaseMouseCapture();
+        RestoreNotesHitTestingAfterPan();
+    }
     private void Viewer_ScrollChanged(object sender, System.Windows.Controls.ScrollChangedEventArgs e)
     {
         UpdateNavigatorViewport();
@@ -649,7 +670,11 @@ public partial class MainWindow : Window
         Viewer.ScrollToVerticalOffset(y * Surface.Height - Viewer.ViewportHeight / 2);
     }
 
-    private void PreviewArea_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateNavigationButtons();
+    private void PreviewArea_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateNavigationButtons();
+        UpdateNoteMonitorScale();
+    }
 
     private void UpdateNavigationButtons()
     {
@@ -760,7 +785,16 @@ public partial class MainWindow : Window
         if (e.Key is Key.OemMinus or Key.Subtract) Zoom(0.8);
     }
 
-    private void Window_KeyUp(object sender, KeyEventArgs e) => UpdateZoomLabel();
+    private void Window_KeyUp(object sender, KeyEventArgs e)
+    {
+        UpdateZoomLabel();
+        if (editingNotes && e.Key == Key.Space && dragPoint is not null)
+        {
+            dragPoint = null;
+            Viewer.ReleaseMouseCapture();
+            RestoreNotesHitTestingAfterPan();
+        }
+    }
     private void Window_Deactivated(object? sender, EventArgs e) => ZoomLabel.Visibility = Visibility.Collapsed;
 
     private void QueueRender()

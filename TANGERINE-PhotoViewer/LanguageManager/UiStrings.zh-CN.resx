@@ -247,10 +247,10 @@
     <value>注册信息的所属应用已变化：{0}</value>
   </data>
   <data name="NavigatorMaximum">
-    <value>鸟览图已达到最大面积（预览区的 1/4）。</value>
+    <value>鸟瞰图已达到最大面积（预览区的 1/4）。</value>
   </data>
   <data name="NavigatorMinimum">
-    <value>鸟览图已达到最小面积（预览区的 1/200）。</value>
+    <value>鸟瞰图已达到最小面积（预览区的 1/200）。</value>
   </data>
   <data name="NextImage">
     <value>下一张</value>
@@ -305,5 +305,122 @@
   </data>
   <data name="UnknownVersion">
     <value>未知</value>
+  </data>
+  <data name="Notes">
+    <value>笔记</value>
+  </data>
+  <data name="Brush">
+    <value>画笔</value>
+  </data>
+  <data name="BrushEraser">
+    <value>画笔的橡皮</value>
+  </data>
+  <data name="SaveAs">
+    <value>另存为</value>
+  </data>
+  <data name="EditingDocumentWithTool">
+    <value>你正在编辑文档，正在使用{0}</value>
+  </data>
+  <data name="SwitchTool">
+    <value>切换工具</value>
+  </data>
+  <data name="ExitEditMode">
+    <value>退出编辑模式</value>
+  </data>
+  <data name="EditedUnsaved">
+    <value>当前图片已被编辑，但尚未保存。</value>
+  </data>
+  <data name="BrushInUse">
+    <value>“画笔”工具正在被使用。</value>
+  </data>
+  <data name="EraserInUse">
+    <value>“画笔的橡皮”工具正在被使用。</value>
+  </data>
+  <data name="BrushOptionsTitle">
+    <value>画笔选项</value>
+  </data>
+  <data name="EraserOptionsTitle">
+    <value>画笔的橡皮选项</value>
+  </data>
+  <data name="BrushColor">
+    <value>画笔颜色</value>
+  </data>
+  <data name="BrushRadius">
+    <value>画笔直径</value>
+  </data>
+  <data name="EraserRadius">
+    <value>橡皮直径</value>
+  </data>
+  <data name="SaveAsFilter">
+    <value>PNG 图片|*.png</value>
+  </data>
+  <data name="SavedAs">
+    <value>已另存为：{0}</value>
+  </data>
+  <data name="SaveFailed">
+    <value>保存失败：{0}</value>
+  </data>
+  <data name="EditUnavailable">
+    <value>当前没有可编辑的图片。</value>
+  </data>
+  <data name="SaveAsProgress">
+    <value>正在保存全分辨率图片… {0}%</value>
+  </data>
+  <data name="SaveAsComplete">
+    <value>全分辨率图片已保存：{0}</value>
+  </data>
+  <data name="RadiusPreview">
+    <value>直径预览：{0} 像素</value>
+  </data>
+  <data name="BrushPixelStatus">
+    <value>当前笔画的像素为{0}像素，在图片中为{1}像素</value>
+  </data>
+  <data name="DisplayMetricsUnavailable">
+    <value>无法获取当前显示器的像素尺寸。</value>
+  </data>
+  <data name="DiameterRange">
+    <value>{0}像素-{1}像素</value>
+  </data>
+  <data name="SaveAsOriginalFilter">
+    <value>原格式 (*.{0})|*.{0}|PNG 图片|*.png</value>
+  </data>
+  <data name="SaveAsPngFilter">
+    <value>PNG 图片|*.png</value>
+  </data>
+  <data name="EditingUnmodified">
+    <value>正在编辑文档；没有未保存的笔记。</value>
+  </data>
+  <data name="EditedSaved">
+    <value>当前图片的笔记已保存。</value>
+  </data>
+  <data name="BrushRed">
+    <value>红色</value>
+  </data>
+  <data name="BrushGreen">
+    <value>绿色</value>
+  </data>
+  <data name="BrushBlue">
+    <value>蓝色</value>
+  </data>
+  <data name="Apply">
+    <value>应用</value>
+  </data>
+  <data name="Cancel">
+    <value>取消</value>
+  </data>
+  <data name="SaveAsCannotOverwriteOriginal">
+    <value>另存为路径不能与原图片路径相同。</value>
+  </data>
+  <data name="AnnotationExportUnsupported">
+    <value>无法编码原格式，请选择 PNG。</value>
+  </data>
+  <data name="AnnotationExportInvalid">
+    <value>图片、保存位置或笔迹数据无效。</value>
+  </data>
+  <data name="AnnotationExportFailed">
+    <value>无法保存带笔记的图片。</value>
+  </data>
+  <data name="AnnotationExportVerificationFailed">
+    <value>保存后的图片校验失败。</value>
   </data>
 </root>
