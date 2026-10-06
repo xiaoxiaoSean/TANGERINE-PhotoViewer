@@ -2,7 +2,8 @@ using ImageMagick;
 using NetVips;
 using System.Globalization;
 using System.IO;
-using System.Text;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using TANGERINE_PhotoViewer.DefaultApps;
 using VipsImage = NetVips.Image;
 
@@ -119,7 +120,9 @@ internal static class AnnotationExport
                 {
                     SaveWithVips(source, temporaryPath, rotation, tiles, textSource, token, progress);
                 }
-                catch (VipsException) when (CanUseMagickFallback(source, destination, multipage: false))
+                catch (Exception error) when ((error is VipsException ||
+                    error is StageException { StageCode: "ANNS0002" }) &&
+                    CanUseMagickFallback(source, destination, multipage: false))
                 {
                     // Some coders can read the source in libvips but cannot
                     // write its original format after an RGBA text overlay.
@@ -275,17 +278,31 @@ internal static class AnnotationExport
         ValidateTileBounds(tiles, original.Width, pageHeight);
         var overlays = new List<VipsImage>();
         var pages = new List<VipsImage>();
-        var textStreams = new List<TextChannelStream>();
         var textChannels = new List<VipsImage>();
+        var textRawFiles = new List<string>();
         var compositeX = new List<int>();
         var compositeY = new List<int>();
+        string? sourceProfilePath = null;
         try
         {
+            // Convert annotation colours to the source device space, leaving
+            // source pixels themselves untouched. A CMYK TIFF cannot be
+            // composited through the default sRGB route, and copying an sRGB
+            // result back to four CMYK bands would corrupt its colour values.
+            if (original.Interpretation == NetVips.Enums.Interpretation.Cmyk &&
+                original.Contains("icc-profile-data") &&
+                original.Get("icc-profile-data") is byte[] profile && profile.Length > 0)
+            {
+                sourceProfilePath = Path.Combine(Path.GetDirectoryName(outputPath)!,
+                    "." + Guid.NewGuid().ToString("N") + ".icc");
+                File.WriteAllBytes(sourceProfilePath, profile);
+            }
             for (var index = 0; index < tiles.Length; index++)
             {
                 token.ThrowIfCancellationRequested();
                 var tile = tiles[index];
-                var overlay = CreateVipsOverlay(tile);
+                var overlay = PrepareOverlayForSource(CreateVipsOverlay(tile),
+                    original, sourceProfilePath);
                 overlays.Add(overlay);
                 compositeX.Add(tile.X);
                 compositeY.Add(tile.Y);
@@ -314,26 +331,24 @@ internal static class AnnotationExport
                     }
                     else
                     {
-                        var sharedTextCache = new SharedTextStripCache(textSource,
-                            textBounds.X, textBounds.Y, textBounds.Width, textBounds.Height, token);
-                        var rgbStream = new TextChannelStream(sharedTextCache,
-                            textBounds.Width, textBounds.Height, alpha: false, token);
-                        var alphaStream = new TextChannelStream(sharedTextCache,
-                            textBounds.Width, textBounds.Height, alpha: true, token);
-                        textStreams.Add(rgbStream);
-                        textStreams.Add(alphaStream);
-                        progress.Report(25);
-                        var rgb = VipsImage.PpmloadStream(rgbStream, memory: false,
+                        // The bundled libvips has rawload but no ppmload_source.
+                        // Write only occupied RGBA rows into a sparse sibling
+                        // file, then let rawload read it lazily during encode.
+                        // Empty areas remain filesystem holes, so a huge text
+                        // rectangle does not reserve an image-sized RAM buffer.
+                        var rawPath = Path.Combine(Path.GetDirectoryName(outputPath)!,
+                            "." + Guid.NewGuid().ToString("N") + ".rgba");
+                        textRawFiles.Add(rawPath);
+                        WriteSparseTextOverlay(textSource, textBounds, rawPath, token, progress);
+                        textOverlay = VipsImage.Rawload(rawPath,
+                            textBounds.Width, textBounds.Height, 4,
+                            format: NetVips.Enums.BandFormat.Uchar,
+                            interpretation: NetVips.Enums.Interpretation.Srgb,
                             access: NetVips.Enums.Access.Sequential);
-                        textChannels.Add(rgb);
-                        progress.Report(30);
-                        var alpha = VipsImage.PpmloadStream(alphaStream, memory: false,
-                            access: NetVips.Enums.Access.Sequential);
-                        textChannels.Add(alpha);
-                        progress.Report(35);
-                        textOverlay = rgb.Bandjoin(alpha);
+                        textChannels.Add(textOverlay);
                     }
-                    overlays.Add(textOverlay);
+                    overlays.Add(PrepareOverlayForSource(textOverlay,
+                        original, sourceProfilePath));
                     compositeX.Add(textBounds.X);
                     compositeY.Add(textBounds.Y);
                 }
@@ -345,25 +360,30 @@ internal static class AnnotationExport
             using var composited = compositeInputs.Length == 0 ? original.Copy() : original.Composite(
                 compositeInputs,
                 Enumerable.Repeat(NetVips.Enums.BlendMode.Over, compositeInputs.Length).ToArray(),
-                compositeX.ToArray(), compositeY.ToArray());
+                compositeX.ToArray(), compositeY.ToArray(),
+                compositingSpace: original.Interpretation);
             progress.Report(40);
             // Composite evaluates in float and adds an alpha band. Without restoring
             // the source depth/band count, a large 8-bit RGB TIFF can grow into a
             // 32-bit RGBA TIFF many times larger than the original.
             using var sourceDepth = composited.Format == original.Format
                 ? composited.Copy() : composited.Cast(original.Format);
-            using var sourceBands = !original.HasAlpha() && sourceDepth.Bands == original.Bands + 1
+            using var sourceBands = sourceDepth.Bands == original.Bands + 1 && !original.HasAlpha()
                 ? sourceDepth.ExtractBand(0, n: original.Bands) : sourceDepth.Copy();
+            if (sourceBands.Bands != original.Bands)
+                throw new StageException("ANNS0002", LanguageManager.Get("AnnotationExportUnsupported")); // ANNS0002
+            using var restoredSpace = sourceBands.Interpretation == original.Interpretation
+                ? sourceBands.Copy() : sourceBands.Copy(interpretation: original.Interpretation);
             // A rotation of the tall TIFF stack would mix pages. Rotate each
             // page separately and concatenate them lazily in the same order.
             using var oriented = multipageTiff && rotation != 0
-                ? RotateTiffPages(sourceBands, pageHeight, rotation, pages, token)
+                ? RotateTiffPages(restoredSpace, pageHeight, rotation, pages, token)
                 : rotation switch
                 {
-                    90 => sourceBands.Rot90(),
-                    180 => sourceBands.Rot180(),
-                    270 => sourceBands.Rot270(),
-                    _ => sourceBands.Copy()
+                    90 => restoredSpace.Rot90(),
+                    180 => restoredSpace.Rot180(),
+                    270 => restoredSpace.Rot270(),
+                    _ => restoredSpace.Copy()
                 };
             oriented.SetProgress(new Progress<int>(percent => progress.Report(40 + Math.Clamp(percent, 0, 100) * 55 / 100)), token);
             progress.Report(40);
@@ -409,7 +429,56 @@ internal static class AnnotationExport
             for (var i = pages.Count - 1; i >= 0; i--) pages[i].Dispose();
             for (var i = overlays.Count - 1; i >= 0; i--) overlays[i].Dispose();
             for (var i = textChannels.Count - 1; i >= 0; i--) textChannels[i].Dispose();
-            for (var i = textStreams.Count - 1; i >= 0; i--) textStreams[i].Dispose();
+            foreach (var rawPath in textRawFiles) TryDelete(rawPath);
+            if (sourceProfilePath is not null) TryDelete(sourceProfilePath);
+        }
+    }
+
+    /// <summary>
+    /// Takes ownership of an sRGB RGBA overlay and returns an image with the
+    /// source's device channels plus its original alpha. Transform only the
+    /// tiny annotation layer: a multi-gigabyte original must stay lazy and
+    /// must retain all untouched pixel values and its embedded profile.
+    /// </summary>
+    private static VipsImage PrepareOverlayForSource(VipsImage rgba,
+        VipsImage original, string? sourceProfilePath)
+    {
+        if ((original.Interpretation is NetVips.Enums.Interpretation.Srgb or
+            NetVips.Enums.Interpretation.Rgb) && sourceProfilePath is null &&
+            original.Format == NetVips.Enums.BandFormat.Uchar)
+            return rgba;
+        if (original.Interpretation is not (NetVips.Enums.Interpretation.Srgb or
+            NetVips.Enums.Interpretation.Rgb or NetVips.Enums.Interpretation.Rgb16 or
+            NetVips.Enums.Interpretation.Bw or NetVips.Enums.Interpretation.Grey16 or
+            NetVips.Enums.Interpretation.Cmyk))
+        {
+            rgba.Dispose();
+            throw new StageException("ANNS0002", LanguageManager.Get("AnnotationExportUnsupported")); // ANNS0002
+        }
+        using (rgba)
+        using (var rgb = rgba.ExtractBand(0, n: 3))
+        using (var alpha = rgba.ExtractBand(3))
+        {
+            var depth = original.Format == NetVips.Enums.BandFormat.Ushort ? 16 : 8;
+            using var converted = sourceProfilePath is not null
+                ? rgb.IccTransform(sourceProfilePath, inputProfile: "srgb", depth: depth)
+                : original.Interpretation == NetVips.Enums.Interpretation.Cmyk
+                    ? rgb.IccTransform("cmyk", inputProfile: "srgb", depth: depth)
+                    : rgb.Colourspace(original.Interpretation);
+            using var deviceColour = converted.Format == original.Format
+                ? converted.Copy() : converted.Cast(original.Format);
+            if (deviceColour.Bands != original.Bands - (original.HasAlpha() ? 1 : 0))
+                throw new StageException("ANNS0002", LanguageManager.Get("AnnotationExportUnsupported")); // ANNS0002
+            // Once ICC conversion produces 16-bit colour, its alpha must be
+            // 16-bit too: leaving 255 as the maximum would make opaque ink
+            // almost transparent against a 65535-range TIFF source.
+            using var deviceAlpha = depth == 16
+                ? (alpha * 257).Cast(NetVips.Enums.BandFormat.Ushort)
+                : alpha.Copy();
+            using var sourceAlpha = deviceAlpha.Format == original.Format
+                ? deviceAlpha.Copy() : deviceAlpha.Cast(original.Format);
+            using var deviceRgba = deviceColour.Bandjoin(sourceAlpha);
+            return deviceRgba.Copy(interpretation: original.Interpretation);
         }
     }
 

@@ -631,7 +631,10 @@ public partial class MainWindow
             {
                 notesSaveOperation = null;
                 savingNotes = false;
-                if (completed) ClearCompletedTaskProgress();
+                // A region read can finish while Save As is starting and append
+                // an unrelated completion. The save result owns this status
+                // snapshot, so discard older completions on either outcome.
+                ClearCompletedTaskProgress();
                 if (completed)
                 {
                     if (textSourceProgressVisible)
