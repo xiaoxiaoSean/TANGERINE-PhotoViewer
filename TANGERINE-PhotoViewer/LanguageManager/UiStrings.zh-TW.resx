@@ -367,7 +367,7 @@
     <value>正在儲存完整解析度圖片… {0}%</value>
   </data>
   <data name="SaveAsComplete">
-    <value>完整解析度圖片已儲存：{0}</value>
+    <value>「另存為」任務完成</value>
   </data>
   <data name="RadiusPreview">
     <value>直徑預覽：{0} 像素</value>
@@ -422,5 +422,134 @@
   </data>
   <data name="AnnotationExportVerificationFailed">
     <value>儲存後的圖片驗證失敗。</value>
+  </data>
+  <data name="TextShadow">
+    <value>陰影</value>
+  </data>
+  <data name="TextDone">
+    <value>完成</value>
+  </data>
+  <data name="HexColor">
+    <value>十六進位顏色</value>
+  </data>
+  <data name="ColorMagenta">
+    <value>洋紅色</value>
+  </data>
+  <data name="TextFont">
+    <value>字型</value>
+  </data>
+  <data name="ColorCyan">
+    <value>青色</value>
+  </data>
+  <data name="TextColor">
+    <value>顏色</value>
+  </data>
+  <data name="ColorWhite">
+    <value>白色</value>
+  </data>
+  <data name="ColorBlack">
+    <value>黑色</value>
+  </data>
+  <data name="ColorInvalid">
+    <value>顏色值無效，請輸入 #RRGGBB。</value>
+  </data>
+  <data name="ColorGreen">
+    <value>綠色</value>
+  </data>
+  <data name="EditingWithTextTool">
+    <value>你正在編輯，「文字」工具正在使用</value>
+  </data>
+  <data name="TextInUse">
+    <value>「文字」工具正在使用</value>
+  </data>
+  <data name="TextOptionsTitle">
+    <value>文字工具選項</value>
+  </data>
+  <data name="StandardColors">
+    <value>標準顏色</value>
+  </data>
+  <data name="TextShadowSize">
+    <value>陰影大小</value>
+  </data>
+  <data name="ColorRed">
+    <value>紅色</value>
+  </data>
+  <data name="TextRectangleTooSmall">
+    <value>矩形太小</value>
+  </data>
+  <data name="TextBold">
+    <value>粗體</value>
+  </data>
+  <data name="TextRenderingFailed">
+    <value>文字繪製失敗：{0}</value>
+  </data>
+  <data name="TextRendering">
+    <value>正在繪製文字 {0}%</value>
+  </data>
+  <data name="TextSpaceInvalid">
+    <value>你畫出的空間無法加入文字</value>
+  </data>
+  <data name="ColorYellow">
+    <value>黃色</value>
+  </data>
+  <data name="ColorBlue">
+    <value>藍色</value>
+  </data>
+  <data name="TextEditingStatus">
+    <value>正在編輯文字</value>
+  </data>
+  <data name="TextTool">
+    <value>文字</value>
+  </data>
+  <data name="TextPlaceholder">
+    <value>Text</value>
+  </data>
+  <data name="TextSettings">
+    <value>文字設定</value>
+  </data>
+  <data name="TextSettingsTitle">
+    <value>文字設定</value>
+  </data>
+  <data name="TextFontSizeRatio">
+    <value>字型大小（矩形高度百分比）</value>
+  </data>
+  <data name="TextShadowOff">
+    <value>無陰影</value>
+  </data>
+  <data name="TextHexColor">
+    <value>十六進位顏色</value>
+  </data>
+  <data name="TextShadowOn">
+    <value>有陰影</value>
+  </data>
+  <data name="ReadingRegionAction">
+    <value>正在讀取圖片</value>
+  </data>
+  <data name="TextRenderingAction">
+    <value>正在繪製文字</value>
+  </data>
+  <data name="PreparingCacheAction">
+    <value>正在準備圖片快取</value>
+  </data>
+  <data name="SaveAsAction">
+    <value>正在另存為</value>
+  </data>
+  <data name="OpeningAction">
+    <value>正在開啟圖片</value>
+  </data>
+  <data name="ColorGray">
+    <value>灰色</value>
+  </data>
+  <data name="ColorOrange">
+    <value>橘色</value>
+  </data>
+  <data name="TextFontSize">
+    <value>文字字型大小</value>
+  </data>
+  <data name="TextFontSizeRange">
+    <value>文字字型大小：{0} 像素（最大 {1} 像素）</value>
+  </data>
+  <data name="TaskCompleted">
+    <value>{0}已完成</value>
   </data>
 </root>

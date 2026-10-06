@@ -367,7 +367,7 @@
     <value>Saving full-resolution image… {0}%</value>
   </data>
   <data name="SaveAsComplete">
-    <value>Saved full-resolution image: {0}</value>
+    <value>"Save As" task completed</value>
   </data>
   <data name="RadiusPreview">
     <value>Diameter preview: {0} px</value>
@@ -422,5 +422,134 @@
   </data>
   <data name="AnnotationExportVerificationFailed">
     <value>The saved image failed verification.</value>
+  </data>
+  <data name="TextShadow">
+    <value>Shadow</value>
+  </data>
+  <data name="TextDone">
+    <value>Done</value>
+  </data>
+  <data name="HexColor">
+    <value>Hex color</value>
+  </data>
+  <data name="ColorMagenta">
+    <value>Magenta</value>
+  </data>
+  <data name="TextFont">
+    <value>Font</value>
+  </data>
+  <data name="ColorCyan">
+    <value>Cyan</value>
+  </data>
+  <data name="TextColor">
+    <value>Color</value>
+  </data>
+  <data name="ColorWhite">
+    <value>White</value>
+  </data>
+  <data name="ColorBlack">
+    <value>Black</value>
+  </data>
+  <data name="ColorInvalid">
+    <value>Invalid color. Enter #RRGGBB.</value>
+  </data>
+  <data name="ColorGreen">
+    <value>Green</value>
+  </data>
+  <data name="EditingWithTextTool">
+    <value>You are editing; the Text tool is in use</value>
+  </data>
+  <data name="TextInUse">
+    <value>The Text tool is being used.</value>
+  </data>
+  <data name="TextOptionsTitle">
+    <value>Text tool options</value>
+  </data>
+  <data name="StandardColors">
+    <value>Standard colors</value>
+  </data>
+  <data name="TextShadowSize">
+    <value>Shadow size</value>
+  </data>
+  <data name="ColorRed">
+    <value>Red</value>
+  </data>
+  <data name="TextRectangleTooSmall">
+    <value>The rectangle is too small.</value>
+  </data>
+  <data name="TextBold">
+    <value>Bold</value>
+  </data>
+  <data name="TextRenderingFailed">
+    <value>Text rendering failed: {0}</value>
+  </data>
+  <data name="TextRendering">
+    <value>Rendering text {0}%</value>
+  </data>
+  <data name="TextSpaceInvalid">
+    <value>The selected space cannot contain text.</value>
+  </data>
+  <data name="ColorYellow">
+    <value>Yellow</value>
+  </data>
+  <data name="ColorBlue">
+    <value>Blue</value>
+  </data>
+  <data name="TextEditingStatus">
+    <value>Editing text</value>
+  </data>
+  <data name="TextTool">
+    <value>Text</value>
+  </data>
+  <data name="TextPlaceholder">
+    <value>Text</value>
+  </data>
+  <data name="TextSettings">
+    <value>Text settings</value>
+  </data>
+  <data name="TextSettingsTitle">
+    <value>Text settings</value>
+  </data>
+  <data name="TextFontSizeRatio">
+    <value>Font size (% of rectangle height)</value>
+  </data>
+  <data name="TextShadowOff">
+    <value>No shadow</value>
+  </data>
+  <data name="TextHexColor">
+    <value>Hex color</value>
+  </data>
+  <data name="TextShadowOn">
+    <value>Shadow</value>
+  </data>
+  <data name="ReadingRegionAction">
+    <value>Reading image</value>
+  </data>
+  <data name="TextRenderingAction">
+    <value>Rendering text</value>
+  </data>
+  <data name="PreparingCacheAction">
+    <value>Preparing image cache</value>
+  </data>
+  <data name="SaveAsAction">
+    <value>Saving image</value>
+  </data>
+  <data name="OpeningAction">
+    <value>Opening image</value>
+  </data>
+  <data name="ColorGray">
+    <value>Gray</value>
+  </data>
+  <data name="ColorOrange">
+    <value>Orange</value>
+  </data>
+  <data name="TextFontSize">
+    <value>Text size</value>
+  </data>
+  <data name="TextFontSizeRange">
+    <value>Text size: {0} px (maximum {1} px)</value>
+  </data>
+  <data name="TaskCompleted">
+    <value>{0} completed</value>
   </data>
 </root>

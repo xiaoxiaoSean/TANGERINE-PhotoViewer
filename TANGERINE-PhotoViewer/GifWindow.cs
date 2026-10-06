@@ -13,6 +13,7 @@ public sealed class GifWindow : Window
     private CancellationTokenSource? operation;
     private bool closing;
     public bool IsWorking => operation is not null;
+    public bool LastExportSucceeded { get; private set; }
     public event EventHandler? WorkStateChanged;
     public event EventHandler<int>? ProgressChanged;
     public void StopWork() => operation?.Cancel();
@@ -39,6 +40,7 @@ public sealed class GifWindow : Window
         var dialog = new OpenFolderDialog { Title = LanguageManager.Get("ChooseExportFolder") };
         if (dialog.ShowDialog(this) != true) return;
         operation = new CancellationTokenSource();
+        LastExportSucceeded = false;
         var current = operation;
         WorkStateChanged?.Invoke(this, EventArgs.Empty);
         export.IsEnabled = false;
@@ -47,11 +49,16 @@ public sealed class GifWindow : Window
             var progress = new Progress<int>(value =>
             {
                 if (closing || !ReferenceEquals(operation, current)) return;
-                status.Content = string.Format(LanguageManager.Get("ExportProgress"), value);
+                status.Content = string.Format(LanguageManager.Get("ExportProgress"),
+                    Math.Clamp(value, 0, 99));
                 ProgressChanged?.Invoke(this, value);
             });
             var count = await Task.Run(() => NativeWork.Run(() => ImageLoader.ExportGif(path, dialog.FolderName, current.Token, progress), current.Token), current.Token);
-            if (!closing) status.Content = string.Format(LanguageManager.Get("ExportedFrames"), count);
+            if (!closing)
+            {
+                status.Content = string.Format(LanguageManager.Get("ExportedFrames"), count);
+                LastExportSucceeded = true;
+            }
         }
         catch (OperationCanceledException) { if (!closing) status.Content = LanguageManager.Get("Stopped"); }
         catch (Exception ex) { if (!closing) status.Content = string.Format(LanguageManager.Get("OperationFailed"), ex.Message); }
@@ -59,6 +66,12 @@ public sealed class GifWindow : Window
         {
             current.Dispose();
             if (ReferenceEquals(operation, current)) operation = null;
+            if (!closing && LastExportSucceeded)
+            {
+                var action = LanguageManager.Get("ExportFrames");
+                if (action.StartsWith("正在", StringComparison.Ordinal)) action = action[2..];
+                status.Content = string.Format(LanguageManager.Get("TaskCompleted"), action);
+            }
             if (!closing) export.IsEnabled = true;
             WorkStateChanged?.Invoke(this, EventArgs.Empty);
         }

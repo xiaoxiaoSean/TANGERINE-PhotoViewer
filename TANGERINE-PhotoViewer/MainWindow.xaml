@@ -14,6 +14,7 @@
       <MenuItem x:Name="NotesItem" Visibility="Collapsed">
         <MenuItem x:Name="BrushItem" Click="Brush_Click" PreviewMouseRightButtonDown="Brush_OptionsRightClick"/>
         <MenuItem x:Name="BrushEraserItem" Click="BrushEraser_Click" PreviewMouseRightButtonDown="Eraser_OptionsRightClick"/>
+        <MenuItem x:Name="TextItem" Click="TextTool_Click" PreviewMouseRightButtonDown="Text_OptionsRightClick"/>
       </MenuItem>
       <MenuItem x:Name="SaveAsItem" Click="SaveAs_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="GifItem" Click="Gif_Click" Visibility="Collapsed"/>
@@ -26,7 +27,10 @@
       <MenuItem x:Name="SwitchToolItem" Visibility="Collapsed">
         <MenuItem x:Name="EditBrushItem" Click="Brush_Click" PreviewMouseRightButtonDown="Brush_OptionsRightClick"/>
         <MenuItem x:Name="EditEraserItem" Click="BrushEraser_Click" PreviewMouseRightButtonDown="Eraser_OptionsRightClick"/>
+        <MenuItem x:Name="EditTextItem" Click="TextTool_Click" PreviewMouseRightButtonDown="Text_OptionsRightClick"/>
       </MenuItem>
+      <MenuItem x:Name="TextSettingsItem" Click="TextSettings_Click" Visibility="Collapsed"/>
+      <MenuItem x:Name="TextFontSizeItem" Click="TextFontSize_Click" Visibility="Collapsed"/>
       <MenuItem x:Name="ExitEditModeItem" Click="ExitEditMode_Click" Visibility="Collapsed"/>
     </Menu>
     <Grid DockPanel.Dock="Bottom" Background="Black">
@@ -37,11 +41,13 @@
         <Label x:Name="NavigatorLimitLabel" Background="Black" Foreground="White" Visibility="Collapsed"/>
       </StackPanel>
       <Label x:Name="StatusLabel" Grid.Column="1" Background="Black" Foreground="White"/>
-      <Slider x:Name="ZoomSlider" Grid.Column="2" Width="200" Margin="12,0" Minimum="0" Maximum="1" IsMoveToPointEnabled="True" Visibility="Collapsed" VerticalAlignment="Center" ValueChanged="ZoomSlider_ValueChanged" MouseMove="ZoomSlider_MouseMove"/>
+      <Slider x:Name="ZoomSlider" Grid.Column="2" Width="200" Margin="12,0" Minimum="0" Maximum="1" IsMoveToPointEnabled="True" Visibility="Collapsed" VerticalAlignment="Center" ValueChanged="ZoomSlider_ValueChanged" MouseMove="ZoomSlider_MouseMove">
+        <Slider.ToolTip><ToolTip Background="Black" Foreground="White" BorderBrush="White"/></Slider.ToolTip>
+      </Slider>
     </Grid>
     <Grid x:Name="PreviewArea" Background="Black" SizeChanged="PreviewArea_SizeChanged">
       <Image x:Name="EmptyLogo" Source="Assets/TANGERINE-PV.png" Stretch="Uniform" MaxWidth="320" MaxHeight="320" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
-      <ScrollViewer x:Name="Viewer" Background="Transparent" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" SizeChanged="Viewer_SizeChanged" PreviewMouseWheel="Viewer_PreviewMouseWheel" PreviewMouseDown="Viewer_PreviewMouseDown" PreviewMouseMove="Viewer_PreviewMouseMove" PreviewMouseUp="Viewer_PreviewMouseUp" ScrollChanged="Viewer_ScrollChanged">
+      <ScrollViewer x:Name="Viewer" Background="Transparent" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" SizeChanged="Viewer_SizeChanged" PreviewMouseWheel="Viewer_PreviewMouseWheel" PreviewMouseDown="Viewer_PreviewMouseDown" PreviewMouseMove="Viewer_PreviewMouseMove" PreviewMouseUp="Viewer_PreviewMouseUp" MouseLeave="Viewer_MouseLeave" ScrollChanged="Viewer_ScrollChanged">
         <Canvas x:Name="Surface" Background="Transparent"><Image x:Name="Preview" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/><Image x:Name="Photo" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/><Canvas x:Name="NotesCanvas" Background="Transparent" IsHitTestVisible="False"/></Canvas>
       </ScrollViewer>
       <Border x:Name="Navigator" Background="Black" BorderBrush="White" BorderThickness="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,0" Visibility="Collapsed" PreviewMouseWheel="Navigator_PreviewMouseWheel">

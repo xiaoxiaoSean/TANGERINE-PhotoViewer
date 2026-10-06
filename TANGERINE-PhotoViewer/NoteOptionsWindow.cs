@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Globalization;
 
 namespace TANGERINE_PhotoViewer;
 
@@ -20,6 +21,8 @@ internal sealed class NoteOptionsWindow : Window
     private readonly Ellipse previewCircle;
     private readonly TextBlock diameterValue;
     private readonly double dpiScale;
+    private readonly TextBox? hexInput;
+    private bool syncingColorControls;
 
     internal Color SelectedColor { get; private set; }
     internal double SelectedDiameter { get; private set; }
@@ -98,14 +101,57 @@ internal sealed class NoteOptionsWindow : Window
             colorPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             colorPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             colorPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+            colorPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             Grid.SetRow(colorPanel, 2);
             root.Children.Add(colorPanel);
             redSlider = CreateColorSlider(colorPanel, 0, LanguageManager.Get("BrushRed"), initialColor.R);
             greenSlider = CreateColorSlider(colorPanel, 1, LanguageManager.Get("BrushGreen"), initialColor.G);
             blueSlider = CreateColorSlider(colorPanel, 2, LanguageManager.Get("BrushBlue"), initialColor.B);
-            redSlider.ValueChanged += (_, _) => UpdatePreview();
-            greenSlider.ValueChanged += (_, _) => UpdatePreview();
-            blueSlider.ValueChanged += (_, _) => UpdatePreview();
+            redSlider.ValueChanged += (_, _) => UpdatePreview(true);
+            greenSlider.ValueChanged += (_, _) => UpdatePreview(true);
+            blueSlider.ValueChanged += (_, _) => UpdatePreview(true);
+            // Keep direct hex entry and color presets in their own proportional row so
+            // they cannot obscure the blue channel slider at smaller window sizes.
+            var picker = new Grid { Margin = new Thickness(0, 3, 0, 0) };
+            picker.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(24, GridUnitType.Star) });
+            picker.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(27, GridUnitType.Star) });
+            picker.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(49, GridUnitType.Star) });
+            Grid.SetRow(picker, 3);
+            colorPanel.Children.Add(picker);
+            picker.Children.Add(new TextBlock { Text = LanguageManager.Get("HexColor"),
+                Foreground = Brushes.White, VerticalAlignment = VerticalAlignment.Bottom });
+            hexInput = new TextBox { Text = $"#{initialColor.R:X2}{initialColor.G:X2}{initialColor.B:X2}",
+                VerticalAlignment = VerticalAlignment.Bottom };
+            Grid.SetColumn(hexInput, 1);
+            picker.Children.Add(hexInput);
+            hexInput.TextChanged += (_, _) =>
+            {
+                if (syncingColorControls) return;
+                if (!TryParseHexColor(hexInput.Text, out var parsed)) return;
+                syncingColorControls = true;
+                redSlider.Value = parsed.R;
+                greenSlider.Value = parsed.G;
+                blueSlider.Value = parsed.B;
+                syncingColorControls = false;
+                UpdatePreview();
+            };
+            var standardColors = new ComboBox { VerticalAlignment = VerticalAlignment.Bottom };
+            Grid.SetColumn(standardColors, 2);
+            picker.Children.Add(standardColors);
+            standardColors.Items.Add(new ComboBoxItem { Content = LanguageManager.Get("StandardColors"), IsEnabled = false });
+            foreach (var (key, color) in new[]
+            {
+                ("ColorWhite", Colors.White), ("ColorBlack", Colors.Black),
+                ("ColorBlue", Colors.Blue), ("ColorGreen", Colors.Green),
+                ("ColorRed", Colors.Red), ("ColorYellow", Colors.Yellow),
+                ("ColorCyan", Colors.Cyan), ("ColorMagenta", Colors.Magenta)
+            }) standardColors.Items.Add(new ComboBoxItem { Content = LanguageManager.Get(key), Tag = color });
+            standardColors.SelectedIndex = 0;
+            standardColors.SelectionChanged += (_, _) =>
+            {
+                if (standardColors.SelectedItem is not ComboBoxItem { Tag: Color selected }) return;
+                hexInput.Text = $"#{selected.R:X2}{selected.G:X2}{selected.B:X2}";
+            };
         }
 
         var buttons = new Grid();
@@ -116,6 +162,12 @@ internal sealed class NoteOptionsWindow : Window
         var accept = new Button { Content = LanguageManager.Get("Apply") };
         accept.Click += (_, _) =>
         {
+            if (chooseColor && !TryParseHexColor(hexInput!.Text, out _))
+            {
+                hexInput.ToolTip = LanguageManager.Get("ColorInvalid");
+                hexInput.Focus();
+                return;
+            }
             SelectedDiameter = diameterSlider.Value;
             SelectedColor = CurrentColor();
             DialogResult = true;
@@ -151,13 +203,29 @@ internal sealed class NoteOptionsWindow : Window
         (byte)Math.Round(redSlider!.Value), (byte)Math.Round(greenSlider!.Value),
         (byte)Math.Round(blueSlider!.Value));
 
-    private void UpdatePreview()
+    private static bool TryParseHexColor(string text, out Color color)
+    {
+        color = Colors.White;
+        var value = text.Trim().TrimStart('#');
+        if (value.Length != 6 || !uint.TryParse(value, NumberStyles.HexNumber,
+                CultureInfo.InvariantCulture, out var rgb)) return false;
+        color = Color.FromRgb((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
+        return true;
+    }
+
+    private void UpdatePreview(bool syncHexFromSliders = false)
     {
         if (previewCircle is null || previewHost is null || diameterValue is null || diameterSlider is null) return;
         var diameterPixels = diameterSlider.Value;
         diameterValue.Text = string.Format(LanguageManager.Get("RadiusPreview"),
             Math.Round(diameterPixels, 1).ToString("0.#"));
         var color = chooseColor ? CurrentColor() : Colors.Black;
+        if (syncHexFromSliders && chooseColor && !syncingColorControls && hexInput is not null)
+        {
+            syncingColorControls = true;
+            hexInput.Text = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+            syncingColorControls = false;
+        }
         previewCircle.Fill = new SolidColorBrush(color);
         previewHost.Background = chooseColor
             ? new SolidColorBrush(Color.FromRgb((byte)(255 - color.R), (byte)(255 - color.G),

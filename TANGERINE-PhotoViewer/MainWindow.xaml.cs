@@ -140,6 +140,9 @@ public partial class MainWindow : Window
     private CancellationToken BeginWork()
     {
         operation?.Cancel();
+        // A new image operation supersedes the previous image job. Remove its
+        // old progress key now; its canceled callback cannot restore it later.
+        ClearActiveImageTaskProgress();
         operation = new CancellationTokenSource();
         activeOperations[operation.Token] = operation;
         stopRequested = false;
@@ -157,12 +160,6 @@ public partial class MainWindow : Window
         RefreshMenu();
     }
 
-    private void ShowProgress(string key)
-    {
-
-        StatusLabel.Content = string.Format(LanguageManager.Get(key), 0);
-    }
-
     private async void Open_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog { Filter = LanguageManager.Get("FileFilter"), CheckFileExists = true };
@@ -171,20 +168,29 @@ public partial class MainWindow : Window
 
     private async Task OpenAsync(string file)
     {
+        ClearCompletedTaskProgress();
         CancelNotesSave();
         renderDelay.Stop();
         CancelDirectoryScan();
         CancelCachePreparation();
         renderSuspended = true;
         var token = BeginWork();
+        SetTaskProgress("open", LanguageManager.Get("OpeningAction"), 0);
         var workGeneration = generation;
         var previous = (path, source, isGif, large, fastRegionAccess, imageWidth, imageHeight, fileSize,
             imageFormat, scale, rotation, preparedRegionPath, Photo.Source, Preview.Source,
             Photo.Width, Photo.Height, Surface.Width, Surface.Height);
+        var completed = false;
         try
         {
-            ShowProgress("OpeningProgress");
-            var progress = new Progress<int>(value => { if (workGeneration == generation && !token.IsCancellationRequested) StatusLabel.Content = string.Format(LanguageManager.Get("OpeningProgress"), value); });
+            var progress = new Progress<int>(value =>
+            {
+                if (workGeneration == generation && operation?.Token == token &&
+                    !token.IsCancellationRequested)
+                {
+                    SetTaskProgress("open", LanguageManager.Get("OpeningAction"), value);
+                }
+            });
             var (previewWidth, previewHeight) = PreviewPixelSize(Viewer.ActualWidth, Viewer.ActualHeight);
             var result = await Task.Run(() => NativeWork.Run(() => ImageLoader.Load(
                 file, LargeFileBytes, previewWidth, previewHeight, token, progress), token), token);
@@ -218,6 +224,7 @@ public partial class MainWindow : Window
             UpdateZoomLabel();
             ResetNotesForNewImage();
             StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
+            completed = true;
             CloseImageWindows();
             _ = ScanDirectoryAsync(file);
             RefreshMenu();
@@ -242,6 +249,12 @@ public partial class MainWindow : Window
         finally
         {
             if (workGeneration == generation) renderSuspended = false;
+            if (workGeneration == generation)
+            {
+                if (completed) CompleteTaskProgress("open",
+                    TaskCompletedMessage("OpeningAction"));
+                else ClearTaskProgress("open");
+            }
             EndWork(token);
         }
     }
@@ -266,12 +279,14 @@ public partial class MainWindow : Window
 
     private async void Unload_Click(object sender, RoutedEventArgs e)
     {
+        ClearCompletedTaskProgress();
         CancelNotesSave();
         var token = BeginWork();
         var workGeneration = generation;
+        var completed = false;
         try
         {
-            ShowProgress("UnloadingProgress");
+            SetTaskProgress("unload", LanguageManager.Get("Unload"), 0);
             await Task.Run(() => { token.ThrowIfCancellationRequested(); }, token);
             token.ThrowIfCancellationRequested();
             if (workGeneration != generation) return;
@@ -290,11 +305,20 @@ public partial class MainWindow : Window
             NavigatorImage.Source = null;
             CloseImageWindows();
             StatusLabel.Content = LanguageManager.Get("Ready");
+            completed = true;
             UpdateZoomLabel();
             RefreshMenu();
         }
         catch (OperationCanceledException) { if (workGeneration == generation) StatusLabel.Content = LanguageManager.Get("Stopped"); }
-        finally { EndWork(token); }
+        finally
+        {
+            if (workGeneration == generation)
+            {
+                if (completed) CompleteTaskProgress("unload", TaskCompletedMessage("Unload"));
+                else ClearTaskProgress("unload");
+            }
+            EndWork(token);
+        }
     }
 
     private void Stop_Click(object sender, RoutedEventArgs e)
@@ -476,6 +500,10 @@ public partial class MainWindow : Window
 
     private void Viewer_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        // Let the text editor receive pointer focus and selection drags. The
+        // surrounding viewer must not turn an editor click into image panning.
+        if (IsTextEditorEvent(e) && !IsTextFrameHandleEvent(e) &&
+            e.ChangedButton != MouseButton.Middle && !Keyboard.IsKeyDown(Key.Space)) return;
         if (HandleNotesMouseDown(e)) return;
         if (e.ChangedButton != MouseButton.Left) return;
         dragPoint = e.GetPosition(Viewer);
@@ -498,9 +526,11 @@ public partial class MainWindow : Window
         Viewer.ReleaseMouseCapture();
         RestoreNotesHitTestingAfterPan();
     }
+    private void Viewer_MouseLeave(object sender, MouseEventArgs e) => ClearTextFrameHover();
     private void Viewer_ScrollChanged(object sender, System.Windows.Controls.ScrollChangedEventArgs e)
     {
         UpdateNavigatorViewport();
+        if (hoveredTextNote is not null) QueueInverseFrameRefresh();
         if (large && !renderSuspended) QueueRender();
     }
 
@@ -539,7 +569,11 @@ public partial class MainWindow : Window
         var x = track is null
             ? Math.Clamp(e.GetPosition(ZoomSlider).X / Math.Max(1, ZoomSlider.ActualWidth), 0, 1)
             : Math.Clamp(e.GetPosition(track).X / Math.Max(1, track.ActualWidth), 0, 1);
-        ZoomSlider.ToolTip = string.Format(LanguageManager.Get("ZoomPercent"), (int)Math.Round(ScaleFromSlider(x) * 100));
+        // Keep the styled ToolTip instance. Replacing it with a string makes WPF
+        // create a default system-colored popup instead of the black/white one.
+        if (ZoomSlider.ToolTip is ToolTip zoomToolTip)
+            zoomToolTip.Content = string.Format(LanguageManager.Get("ZoomPercent"),
+                (int)Math.Round(ScaleFromSlider(x) * 100));
     }
 
     private void SetDefaultNavigatorSize()
@@ -772,6 +806,9 @@ public partial class MainWindow : Window
     private async void NextImage_Click(object sender, RoutedEventArgs e) => await NavigateImageAsync(1);
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {
+        // The editable text overlay owns navigation and selection keys while it has focus.
+        // Treating those keys as photo navigation would discard the user's editing context.
+        if (IsTextEditorFocused()) return;
         UpdateZoomLabel();
         if (Keyboard.Modifiers == ModifierKeys.None &&
             e.Key is Key.Left or Key.Up or Key.Right or Key.Down)
@@ -845,6 +882,7 @@ public partial class MainWindow : Window
     {
         cachePreparation?.Cancel();
         cachePreparation = null;
+        ClearTaskProgress("cache");
         RefreshMenu();
     }
 
@@ -867,13 +905,16 @@ public partial class MainWindow : Window
         var cachePath = Path.Combine(Path.GetTempPath(), "TangerinePhotoViewer",
             "ImageCache", Guid.NewGuid().ToString("N") + ".tif");
         RefreshMenu();
+        SetTaskProgress("cache", LanguageManager.Get("PreparingCacheAction"), 0);
+        var completed = false;
         try
         {
-            StatusLabel.Content = LanguageManager.Get("PreparingImageCache");
             var progress = new Progress<int>(value =>
             {
                 if (ReferenceEquals(cachePreparation, work) && !work.IsCancellationRequested && value > 0)
-                    StatusLabel.Content = string.Format(LanguageManager.Get("PreparingImageCacheProgress"), value);
+                {
+                    SetTaskProgress("cache", LanguageManager.Get("PreparingCacheAction"), value);
+                }
             });
             await Task.Run(() =>
             {
@@ -884,6 +925,7 @@ public partial class MainWindow : Window
             if (!ReferenceEquals(cachePreparation, work) || path != file) return;
             preparedRegionPath = cachePath;
             StatusLabel.Content = LanguageManager.Get("ImageCacheReady");
+            completed = true;
             QueueRender();
         }
         catch (OperationCanceledException)
@@ -900,6 +942,12 @@ public partial class MainWindow : Window
         }
         finally
         {
+            if (ReferenceEquals(cachePreparation, work))
+            {
+                if (completed) CompleteTaskProgress("cache",
+                    TaskCompletedMessage("PreparingCacheAction"));
+                else ClearTaskProgress("cache");
+            }
             if (ReferenceEquals(cachePreparation, work)) cachePreparation = null;
             if (cachePath != preparedRegionPath)
                 try { if (File.Exists(cachePath)) File.Delete(cachePath); }
@@ -922,10 +970,11 @@ public partial class MainWindow : Window
         var file = path;
         var decodePath = fastRegionAccess ? file : preparedRegionPath!;
         var token = BeginWork();
+        SetTaskProgress("region", LanguageManager.Get("ReadingRegionAction"), 0);
         var workGeneration = generation;
+        var completed = false;
         try
         {
-            StatusLabel.Content = LanguageManager.Get("ReadingRegionPreparing");
             var fullWidth = rotation is 90 or 270 ? imageHeight : imageWidth;
             var fullHeight = rotation is 90 or 270 ? imageWidth : imageHeight;
             var viewX = Math.Clamp((int)(Viewer.HorizontalOffset / scale), 0, fullWidth - 1);
@@ -940,8 +989,11 @@ public partial class MainWindow : Window
             var displayScale = scale * Math.Max(dpi.DpiScaleX, dpi.DpiScaleY);
             var progress = new Progress<int>(value =>
             {
-                if (value > 0 && workGeneration == generation && !token.IsCancellationRequested)
-                    StatusLabel.Content = string.Format(LanguageManager.Get("ReadingProgress"), value);
+                if (value > 0 && workGeneration == generation && operation?.Token == token &&
+                    !token.IsCancellationRequested)
+                {
+                    SetTaskProgress("region", LanguageManager.Get("ReadingRegionAction"), value);
+                }
             });
             BitmapSource? tile;
             await regionDecodeGate.WaitAsync(token);
@@ -962,6 +1014,7 @@ public partial class MainWindow : Window
             {
                 Photo.Source = null;
                 StatusLabel.Content = LanguageManager.Get("LargePreviewOnly");
+                completed = true;
                 return;
             }
             renderSuspended = true;
@@ -970,13 +1023,24 @@ public partial class MainWindow : Window
                 Photo.Source = tile;
                 Photo.Width = viewport.Width * scale; Photo.Height = viewport.Height * scale;
                 Canvas.SetLeft(Photo, viewport.X * scale); Canvas.SetTop(Photo, viewport.Y * scale);
+                if (hoveredTextNote is not null) QueueInverseFrameRefresh();
             }
             finally { renderSuspended = false; }
             StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
+            completed = true;
         }
         catch (OperationCanceledException) { if (workGeneration == generation) StatusLabel.Content = LanguageManager.Get("Stopped"); }
         catch (Exception ex) { if (workGeneration == generation) StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), ex.Message); }
-        finally { EndWork(token); }
+        finally
+        {
+            if (workGeneration == generation)
+            {
+                if (completed) CompleteTaskProgress("region",
+                    TaskCompletedMessage("ReadingRegionAction"));
+                else ClearTaskProgress("region");
+            }
+            EndWork(token);
+        }
     }
 
     private async Task RefreshPreviewAsync()
@@ -988,14 +1052,18 @@ public partial class MainWindow : Window
         var (width, height) = PreviewPixelSize(Surface.Width, Surface.Height);
         if (angle is 90 or 270) (width, height) = (height, width);
         var token = BeginWork();
+        SetTaskProgress("preview", LanguageManager.Get("ReadingRegionAction"), 0);
         var workGeneration = generation;
+        var completed = false;
         try
         {
-            StatusLabel.Content = LanguageManager.Get("ReadingRegionPreparing");
             var progress = new Progress<int>(value =>
             {
-                if (value > 0 && workGeneration == generation && !token.IsCancellationRequested)
-                    StatusLabel.Content = string.Format(LanguageManager.Get("ReadingProgress"), value);
+                if (value > 0 && workGeneration == generation && operation?.Token == token &&
+                    !token.IsCancellationRequested)
+                {
+                    SetTaskProgress("preview", LanguageManager.Get("ReadingRegionAction"), value);
+                }
             });
             var preview = await Task.Run(() => ImageLoader.LoadPreview(file, width, height, token, progress), token);
             token.ThrowIfCancellationRequested();
@@ -1006,10 +1074,20 @@ public partial class MainWindow : Window
             UpdateGeometry();
             UpdateNavigatorImage();
             StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
+            completed = true;
         }
         catch (OperationCanceledException) { if (workGeneration == generation) StatusLabel.Content = LanguageManager.Get("Stopped"); }
         catch (Exception ex) { if (workGeneration == generation) StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), ex.Message); }
-        finally { EndWork(token); }
+        finally
+        {
+            if (workGeneration == generation)
+            {
+                if (completed) CompleteTaskProgress("preview",
+                    TaskCompletedMessage("ReadingRegionAction"));
+                else ClearTaskProgress("preview");
+            }
+            EndWork(token);
+        }
     }
 
     private void Gif_Click(object sender, RoutedEventArgs e)
@@ -1018,15 +1096,31 @@ public partial class MainWindow : Window
         if (gifWindow is not null) { gifWindow.Activate(); return; }
         var window = new GifWindow(path) { Owner = this };
         gifWindow = window;
-        window.WorkStateChanged += (_, _) => { if (ReferenceEquals(gifWindow, window)) RefreshMenu(); };
+        window.WorkStateChanged += (_, _) =>
+        {
+            if (!ReferenceEquals(gifWindow, window)) return;
+            if (!window.IsWorking)
+            {
+                if (window.LastExportSucceeded)
+                    CompleteTaskProgress("gif", TaskCompletedMessage("ExportFrames"));
+                else ClearTaskProgress("gif");
+            }
+            else
+            {
+                ClearCompletedTaskProgress();
+                SetTaskProgress("gif", LanguageManager.Get("ExportFrames"), 0);
+            }
+            RefreshMenu();
+        };
         window.ProgressChanged += (_, value) =>
         {
             if (ReferenceEquals(gifWindow, window))
-                StatusLabel.Content = string.Format(LanguageManager.Get("ExportProgress"), value);
+                SetTaskProgress("gif", LanguageManager.Get("ExportFrames"), value);
         };
         window.Closed += (_, _) =>
         {
             if (ReferenceEquals(gifWindow, window)) gifWindow = null;
+            if (window.IsWorking) ClearTaskProgress("gif");
             RefreshMenu();
         };
         window.Show();
