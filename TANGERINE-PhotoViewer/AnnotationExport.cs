@@ -278,7 +278,6 @@ internal static class AnnotationExport
         ValidateTileBounds(tiles, original.Width, pageHeight);
         var overlays = new List<VipsImage>();
         var pages = new List<VipsImage>();
-        var textChannels = new List<VipsImage>();
         var textRawFiles = new List<string>();
         var compositeX = new List<int>();
         var compositeY = new List<int>();
@@ -331,21 +330,23 @@ internal static class AnnotationExport
                     }
                     else
                     {
-                        // The bundled libvips has rawload but no ppmload_source.
-                        // Write only occupied RGBA rows into a sparse sibling
+                        // The published runtime could not resolve ppmload_source.
+                        // Write only occupied RGBA rows into a sparse temporary
                         // file, then let rawload read it lazily during encode.
                         // Empty areas remain filesystem holes, so a huge text
                         // rectangle does not reserve an image-sized RAM buffer.
-                        var rawPath = Path.Combine(Path.GetDirectoryName(outputPath)!,
-                            "." + Guid.NewGuid().ToString("N") + ".rgba");
+                        var rawPath = Path.Combine(Path.GetTempPath(),
+                            "TangerinePhotoViewer", "AnnotationCache",
+                            Guid.NewGuid().ToString("N") + ".rgba");
+                        Directory.CreateDirectory(Path.GetDirectoryName(rawPath)!);
                         textRawFiles.Add(rawPath);
                         WriteSparseTextOverlay(textSource, textBounds, rawPath, token, progress);
                         textOverlay = VipsImage.Rawload(rawPath,
                             textBounds.Width, textBounds.Height, 4,
                             format: NetVips.Enums.BandFormat.Uchar,
                             interpretation: NetVips.Enums.Interpretation.Srgb,
+                            memory: false,
                             access: NetVips.Enums.Access.Sequential);
-                        textChannels.Add(textOverlay);
                     }
                     overlays.Add(PrepareOverlayForSource(textOverlay,
                         original, sourceProfilePath));
@@ -428,7 +429,6 @@ internal static class AnnotationExport
         {
             for (var i = pages.Count - 1; i >= 0; i--) pages[i].Dispose();
             for (var i = overlays.Count - 1; i >= 0; i--) overlays[i].Dispose();
-            for (var i = textChannels.Count - 1; i >= 0; i--) textChannels[i].Dispose();
             foreach (var rawPath in textRawFiles) TryDelete(rawPath);
             if (sourceProfilePath is not null) TryDelete(sourceProfilePath);
         }
@@ -590,6 +590,78 @@ internal static class AnnotationExport
         return raw.Copy(interpretation: NetVips.Enums.Interpretation.Srgb);
     }
 
+    /// <summary>
+    /// Writes the original-pixel text layer as a sparse RGBA file. Only rows
+    /// containing rendered glyphs are written; a later rawload reads this
+    /// file lazily without requiring the optional PPM source operation in the
+    /// native libvips package. The file remains open until every tile has been
+    /// written, then its length is checked before it enters the save graph.
+    /// </summary>
+    private static void WriteSparseTextOverlay(TextAnnotationSource source,
+        (int X, int Y, int Width, int Height) bounds, string path,
+        CancellationToken token, IProgress<int> progress)
+    {
+        var rowStride = checked((long)bounds.Width * 4);
+        var byteLength = checked(rowStride * bounds.Height);
+        var columns = (bounds.Width + 255L) / 256;
+        var rows = (bounds.Height + 255L) / 256;
+        var total = checked(columns * rows);
+        long finished = 0;
+        using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write,
+            FileShare.Read, 64 * 1024, FileOptions.RandomAccess);
+        // Windows does not promise that a plain SetLength leaves unallocated
+        // ranges sparse. Mark the file before extending it, or a large text
+        // rectangle may consume its entire raw size on the system drive.
+        if (!SetSparse(stream.SafeFileHandle))
+            throw new StageException("ANNS0002", LanguageManager.Get("AnnotationExportUnsupported")); // ANNS0002
+        stream.SetLength(byteLength);
+        for (var tileY = 0; tileY < bounds.Height; tileY += 256)
+            for (var tileX = 0; tileX < bounds.Width; tileX += 256)
+            {
+                token.ThrowIfCancellationRequested();
+                var tile = source.RenderTile(bounds.X + tileX, bounds.Y + tileY,
+                    Math.Min(256, bounds.Width - tileX),
+                    Math.Min(256, bounds.Height - tileY), token);
+                if (tile is not null)
+                {
+                    var rgba = new byte[checked(tile.Width * 4)];
+                    for (var y = 0; y < tile.Height; y++)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var sourceRow = y * tile.Width * 4;
+                        for (var x = 0; x < tile.Width; x++)
+                        {
+                            var from = sourceRow + x * 4;
+                            var to = x * 4;
+                            rgba[to] = tile.BgraPixels[from + 2];
+                            rgba[to + 1] = tile.BgraPixels[from + 1];
+                            rgba[to + 2] = tile.BgraPixels[from];
+                            rgba[to + 3] = tile.BgraPixels[from + 3];
+                        }
+                        var offset = checked(((long)tileY + y) * rowStride + (long)tileX * 4);
+                        RandomAccess.Write(stream.SafeFileHandle, rgba, offset);
+                    }
+                }
+                finished++;
+                if (finished % 16 == 0 || finished == total)
+                    progress.Report((int)(15 + finished * 20 / total));
+            }
+        stream.Flush(flushToDisk: true);
+        if (stream.Length != byteLength)
+            throw new StageException("ANNS0003", LanguageManager.Get("AnnotationExportFailed")); // ANNS0003
+    }
+
+    private const uint FsctlSetSparse = 0x000900C4;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool DeviceIoControl(SafeFileHandle file, uint controlCode,
+        IntPtr input, uint inputLength, IntPtr output, uint outputLength,
+        out uint bytesReturned, IntPtr overlapped);
+
+    private static bool SetSparse(SafeFileHandle file) =>
+        DeviceIoControl(file, FsctlSetSparse, IntPtr.Zero, 0,
+            IntPtr.Zero, 0, out _, IntPtr.Zero);
+
     private static VipsImage RotateTiffPages(VipsImage stack, int pageHeight, int rotation,
         List<VipsImage> ownedPages, CancellationToken token)
     {
@@ -607,191 +679,6 @@ internal static class AnnotationExport
             });
         }
         return VipsImage.Arrayjoin(ownedPages.ToArray(), across: 1, shim: 0);
-    }
-
-    /// <summary>
-    /// Shares bounded tile output between the RGB and alpha PNM readers. The
-    /// current source strip is at most 128 MiB and is discarded on crossing a
-    /// strip boundary; each text tile is normally rasterized once, not twice.
-    /// </summary>
-    private sealed class SharedTextStripCache
-    {
-        private readonly TextAnnotationSource source;
-        private readonly int width;
-        private readonly int height;
-        private readonly int originX;
-        private readonly int originY;
-        private readonly CancellationToken token;
-        private readonly int stripHeight;
-        private readonly Dictionary<(int X, int Y), AnnotationTile?> tiles = [];
-        private readonly object gate = new();
-        private int cachedStripY = -1;
-        private readonly System.Windows.Rect[] textBounds;
-
-        internal SharedTextStripCache(TextAnnotationSource source, int originX, int originY,
-            int width, int height, CancellationToken token)
-        {
-            this.source = source;
-            this.originX = originX;
-            this.originY = originY;
-            this.width = width;
-            this.height = height;
-            this.token = token;
-            stripHeight = (int)Math.Clamp(128L * 1024 * 1024 / ((long)width * 4), 1, 256);
-            textBounds = source.SourceBounds.ToArray();
-        }
-
-        internal int StripHeight => stripHeight;
-
-        internal AnnotationTile? Get(int x, int y)
-        {
-            var stripY = y / stripHeight * stripHeight;
-            var tileX = x / 256 * 256;
-            lock (gate)
-            {
-                token.ThrowIfCancellationRequested();
-                if (cachedStripY != stripY)
-                {
-                    // The native PNM reader calls Get for many small pieces of
-                    // the same row. Clearing by scanning dictionary keys on
-                    // every call made wide images quadratic in tile count.
-                    // A strip change is the only time cached tiles can expire.
-                    tiles.Clear();
-                    cachedStripY = stripY;
-                }
-                var key = (tileX, stripY);
-                if (!tiles.TryGetValue(key, out var tile))
-                {
-                    var tileWidth = Math.Min(256, width - tileX);
-                    var tileHeight = Math.Min(stripHeight, height - stripY);
-                    var region = new System.Windows.Rect(originX + tileX,
-                        originY + stripY, tileWidth, tileHeight);
-                    // A union bounding box can contain a huge empty gap
-                    // between separate text rectangles. Skip those regions
-                    // without asking the STA raster worker to shape them.
-                    tile = textBounds.Any(bound => bound.IntersectsWith(region))
-                        ? source.RenderTile(originX + tileX, originY + stripY,
-                            tileWidth, tileHeight, token) : null;
-                    tiles[key] = tile;
-                }
-                return tile;
-            }
-        }
-    }
-
-    /// <summary>
-    /// A seekable virtual P6/P5 image. libvips reads RGB and alpha as separate
-    /// sequential sources, then joins them into one transparent overlay. No
-    /// image-sized byte array or temporary raw file is allocated.
-    /// </summary>
-    private sealed class TextChannelStream : Stream
-    {
-        private readonly SharedTextStripCache source;
-        private readonly int width;
-        private readonly int height;
-        private readonly bool alpha;
-        private readonly CancellationToken token;
-        private readonly byte[] header;
-        private readonly long length;
-        private readonly int channels;
-        private long position;
-
-        internal TextChannelStream(SharedTextStripCache source, int width, int height,
-            bool alpha, CancellationToken token)
-        {
-            this.source = source;
-            this.width = width;
-            this.height = height;
-            this.alpha = alpha;
-            this.token = token;
-            channels = alpha ? 1 : 3;
-            header = Encoding.ASCII.GetBytes($"{(alpha ? "P5" : "P6")}\n{width} {height}\n255\n");
-            length = checked(header.LongLength + (long)width * height * channels);
-        }
-
-        public override bool CanRead => true;
-        public override bool CanSeek => true;
-        public override bool CanWrite => false;
-        public override long Length => length;
-        public override long Position
-        {
-            get => position;
-            set => position = value is >= 0 && value <= length ? value
-                : throw new ArgumentOutOfRangeException(nameof(value));
-        }
-
-        public override int Read(byte[] buffer, int offset, int count)
-            => Read(buffer.AsSpan(offset, count));
-
-        public override int Read(Span<byte> destination)
-        {
-            token.ThrowIfCancellationRequested();
-            if (position >= length || destination.IsEmpty) return 0;
-            var copied = 0;
-            if (position < header.Length)
-            {
-                var headerCount = Math.Min(destination.Length, header.Length - (int)position);
-                header.AsSpan((int)position, headerCount).CopyTo(destination);
-                position += headerCount;
-                copied += headerCount;
-                destination = destination[headerCount..];
-            }
-            while (!destination.IsEmpty && position < length)
-            {
-                token.ThrowIfCancellationRequested();
-                var pixelBytes = position - header.Length;
-                var pixelIndex = pixelBytes / channels;
-                var band = (int)(pixelBytes % channels);
-                var y = (int)(pixelIndex / width);
-                var x = (int)(pixelIndex % width);
-                if (y >= height) break;
-                var tileX = x / 256 * 256;
-                var stripY = y / source.StripHeight * source.StripHeight;
-                var cachedTile = source.Get(x, y);
-                var tileWidth = Math.Min(256, width - tileX);
-                var localX = x - tileX;
-                var localY = y - stripY;
-                var pixelsAvailable = Math.Min(tileWidth - localX,
-                    (destination.Length + band + channels - 1) / channels);
-                var bytesAvailable = Math.Min(destination.Length,
-                    pixelsAvailable * channels - band);
-                var output = destination[..bytesAvailable];
-                if (cachedTile is null) output.Clear();
-                else
-                {
-                    var sourcePixels = cachedTile.BgraPixels;
-                    for (var i = 0; i < bytesAvailable; i++)
-                    {
-                        var component = (band + i) % channels;
-                        var pixelOffset = ((localY * tileWidth + localX) +
-                            (band + i) / channels) * 4;
-                        output[i] = alpha ? sourcePixels[pixelOffset + 3]
-                            : sourcePixels[pixelOffset + (2 - component)];
-                    }
-                }
-                destination = destination[bytesAvailable..];
-                position += bytesAvailable;
-                copied += bytesAvailable;
-            }
-            return copied;
-        }
-
-        public override long Seek(long offset, SeekOrigin origin)
-        {
-            var basis = origin switch
-            {
-                SeekOrigin.Begin => 0L,
-                SeekOrigin.Current => position,
-                SeekOrigin.End => length,
-                _ => throw new ArgumentOutOfRangeException(nameof(origin))
-            };
-            Position = checked(basis + offset);
-            return position;
-        }
-
-        public override void Flush() { }
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private static void ValidateTileBounds(AnnotationTile[] tiles, int width, int height)

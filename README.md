@@ -1,5 +1,5 @@
 TANGERINE-PhotoViewer(TPV)
-
+Support English and Chinese
 TANGERINE-PhotoViewer(TPV) is a photo viewer which based on Dotnet10.It can be used on Windows.
 It supports following formats,and we use some solutions and nuget to view the photo:
 

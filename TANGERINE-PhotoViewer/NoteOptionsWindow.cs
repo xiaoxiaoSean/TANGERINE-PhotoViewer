@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Globalization;
@@ -73,6 +75,20 @@ internal sealed class NoteOptionsWindow : Window
             Value = Math.Clamp(initialDiameter, minimumDiameter, maximumDiameter),
             VerticalAlignment = VerticalAlignment.Center,
             IsMoveToPointEnabled = true
+        };
+        diameterSlider.ToolTip = new ToolTip
+        {
+            Background = Brushes.Black,
+            Foreground = Brushes.White,
+            BorderBrush = Brushes.White,
+            Placement = PlacementMode.Relative,
+            PlacementTarget = diameterSlider
+        };
+        diameterSlider.MouseEnter += DiameterSlider_MouseMove;
+        diameterSlider.MouseMove += DiameterSlider_MouseMove;
+        diameterSlider.MouseLeave += (_, _) =>
+        {
+            if (diameterSlider.ToolTip is ToolTip tip) tip.IsOpen = false;
         };
         Grid.SetColumn(diameterSlider, 1);
         diameterPanel.Children.Add(diameterSlider);
@@ -197,6 +213,26 @@ internal sealed class NoteOptionsWindow : Window
         Grid.SetColumn(slider, 1);
         group.Children.Add(slider);
         return slider;
+    }
+
+    private void DiameterSlider_MouseMove(object sender, MouseEventArgs e)
+    {
+        var track = diameterSlider.Template.FindName("PART_Track", diameterSlider) as Track;
+        var pointer = track is null ? e.GetPosition(diameterSlider).X : e.GetPosition(track).X;
+        var length = track?.ActualWidth ?? diameterSlider.ActualWidth;
+        // The slider's extreme values occur at the thumb center, so exclude
+        // the half-thumb margins when mapping the pointer to a pixel diameter.
+        var halfThumb = (track?.Thumb?.ActualWidth ?? 0) / 2;
+        var fraction = Math.Clamp((pointer - halfThumb) /
+            Math.Max(1, length - 2 * halfThumb), 0, 1);
+        var diameter = diameterSlider.Minimum + fraction *
+            (diameterSlider.Maximum - diameterSlider.Minimum);
+        if (diameterSlider.ToolTip is not ToolTip tip) return;
+        tip.Content = string.Format(LanguageManager.Get("DiameterAtPointer"),
+            diameter.ToString("0.#"));
+        tip.HorizontalOffset = e.GetPosition(diameterSlider).X;
+        tip.VerticalOffset = -Math.Max(24, tip.ActualHeight + 4);
+        tip.IsOpen = true;
     }
 
     private Color CurrentColor() => !chooseColor ? SelectedColor : Color.FromRgb(

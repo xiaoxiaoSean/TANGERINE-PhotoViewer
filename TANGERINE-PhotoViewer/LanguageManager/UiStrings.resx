@@ -552,4 +552,7 @@
   <data name="TaskCompleted">
     <value>{0} completed</value>
   </data>
+  <data name="DiameterAtPointer">
+    <value>Diameter at pointer: {0} px</value>
+  </data>
 </root>

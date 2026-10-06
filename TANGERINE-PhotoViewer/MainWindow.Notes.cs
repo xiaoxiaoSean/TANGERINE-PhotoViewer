@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
 using TANGERINE_PhotoViewer.DefaultApps;
 
 namespace TANGERINE_PhotoViewer;
@@ -54,6 +55,8 @@ public partial class MainWindow
     private double eraserDiameter;
     private bool diameterInitialized;
     private double monitorDpiScale = 1;
+    private Ellipse? activeEraserPreview;
+    private Point activeEraserPosition;
     private long notesVersion;
     private long savedNotesVersion;
     private CancellationTokenSource? notesSaveOperation;
@@ -123,6 +126,7 @@ public partial class MainWindow
         dragPoint = null;
         Viewer.ReleaseMouseCapture();
         NotesCanvas.Children.Clear();
+        activeEraserPreview = null;
         noteTiles.Clear();
         notesVersion++;
         savedNotesVersion = notesVersion;
@@ -136,6 +140,7 @@ public partial class MainWindow
         NotesCanvas.Width = rotation is 90 or 270 ? imageHeight : imageWidth;
         NotesCanvas.Height = rotation is 90 or 270 ? imageWidth : imageHeight;
         NotesCanvas.RenderTransform = new ScaleTransform(scale, scale);
+        UpdateActiveEraserPreview();
         // Image.Source is a raster bitmap tile. Rotations change only its position and
         // RenderTransform; original pixel dimensions and byte arrays stay unchanged.
         foreach (var entry in noteTiles)
@@ -191,6 +196,11 @@ public partial class MainWindow
     private void EnterNotesMode(NoteTool tool)
     {
         if (source is null || savingNotes) return;
+        if (drawingNote && noteTool == NoteTool.Eraser && tool != NoteTool.Eraser)
+        {
+            CancelActiveEraserPreview();
+            Viewer.ReleaseMouseCapture();
+        }
         if (tool != NoteTool.Text)
         {
             try
@@ -201,6 +211,7 @@ public partial class MainWindow
             catch (StageException ex) { ShowNotesError(ex); return; }
         }
         noteTool = tool;
+        if (tool != NoteTool.Eraser) HideActiveEraserPreview();
         editingNotes = true;
         noteStatusResult = false;
         NotesCanvas.IsHitTestVisible = true;
@@ -213,9 +224,12 @@ public partial class MainWindow
 
     private void ExitNotesMode()
     {
+        if (noteTool == NoteTool.Eraser && drawingNote)
+            Viewer.ReleaseMouseCapture();
         editingNotes = false;
         drawingNote = false;
         lastNotePoint = null;
+        HideActiveEraserPreview();
         CancelTextNoteEditing();
         NotesCanvas.IsHitTestVisible = false;
     }
@@ -274,9 +288,10 @@ public partial class MainWindow
                 var (minimum, maximum, dpiScale) = DisplayPixelMetrics.Get(this);
                 EnsureDefaultDiameters(minimum);
                 var window = new NoteOptionsWindow(false, brushColor, eraserDiameter,
-                    minimum, maximum, dpiScale) { Owner = this };
+                    minimum, maximum * 5, dpiScale) { Owner = this };
                 if (window.ShowDialog() != true) return;
                 eraserDiameter = window.SelectedDiameter;
+                UpdateActiveEraserPreview();
                 UpdateNoteStatus();
             }
             catch (StageException ex)
@@ -325,8 +340,10 @@ public partial class MainWindow
             return true;
         }
         drawingNote = true;
-        lastNotePoint = ToOriginalPoint(e.GetPosition(NotesCanvas));
+        var canvasPoint = e.GetPosition(NotesCanvas);
+        lastNotePoint = ToOriginalPoint(canvasPoint);
         PaintNoteSegment(lastNotePoint.Value, lastNotePoint.Value);
+        if (noteTool == NoteTool.Eraser) ShowActiveEraserPreview(canvasPoint);
         Viewer.CaptureMouse();
         e.Handled = true;
         UpdateNoteStatus();
@@ -345,9 +362,17 @@ public partial class MainWindow
             e.Handled = true;
             return true;
         }
-        if (e.LeftButton != MouseButtonState.Pressed || lastNotePoint is null) return true;
-        var current = ToOriginalPoint(e.GetPosition(NotesCanvas));
+        if (e.LeftButton != MouseButtonState.Pressed || lastNotePoint is null)
+        {
+            drawingNote = false;
+            lastNotePoint = null;
+            HideActiveEraserPreview();
+            return true;
+        }
+        var canvasPoint = e.GetPosition(NotesCanvas);
+        var current = ToOriginalPoint(canvasPoint);
         PaintNoteSegment(lastNotePoint.Value, current);
+        if (noteTool == NoteTool.Eraser) ShowActiveEraserPreview(canvasPoint);
         lastNotePoint = current;
         e.Handled = true;
         return true;
@@ -368,6 +393,7 @@ public partial class MainWindow
         }
         drawingNote = false;
         lastNotePoint = null;
+        HideActiveEraserPreview();
         Viewer.ReleaseMouseCapture();
         RefreshMenu();
         UpdateNoteStatus();
@@ -376,6 +402,61 @@ public partial class MainWindow
     private void RestoreNotesHitTestingAfterPan()
     {
         if (editingNotes) NotesCanvas.IsHitTestVisible = true;
+    }
+
+    /// <summary>
+    /// Shows one reusable screen-sized eraser indicator while the left mouse
+    /// button is held. Its dark translucent center is only a UI overlay;
+    /// source pixels and the saved annotation tiles remain untouched.
+    /// </summary>
+    private void ShowActiveEraserPreview(Point canvasPoint)
+    {
+        activeEraserPosition = canvasPoint;
+        if (activeEraserPreview is null)
+        {
+            activeEraserPreview = new Ellipse
+            {
+                IsHitTestVisible = false,
+                Fill = new SolidColorBrush(Color.FromArgb(92, 0, 0, 0)),
+                Stroke = Brushes.White,
+                Visibility = Visibility.Collapsed
+            };
+            Panel.SetZIndex(activeEraserPreview, int.MaxValue);
+            NotesCanvas.Children.Add(activeEraserPreview);
+        }
+        activeEraserPreview.Visibility = Visibility.Visible;
+        UpdateActiveEraserPreview();
+    }
+
+    private void UpdateActiveEraserPreview()
+    {
+        if (activeEraserPreview is null || !drawingNote || noteTool != NoteTool.Eraser)
+            return;
+        // The configured diameter is physical monitor pixels. NotesCanvas is
+        // scaled by image zoom, so divide by both zoom and monitor DPI here.
+        var displayScale = scale * monitorDpiScale;
+        if (!double.IsFinite(displayScale) || displayScale <= 0) return;
+        var diameter = eraserDiameter / displayScale;
+        activeEraserPreview.Width = diameter;
+        activeEraserPreview.Height = diameter;
+        activeEraserPreview.StrokeThickness = 1 / displayScale;
+        Canvas.SetLeft(activeEraserPreview, activeEraserPosition.X - diameter / 2);
+        Canvas.SetTop(activeEraserPreview, activeEraserPosition.Y - diameter / 2);
+    }
+
+    private void HideActiveEraserPreview()
+    {
+        if (activeEraserPreview is not null)
+            activeEraserPreview.Visibility = Visibility.Collapsed;
+    }
+
+    private void CancelActiveEraserPreview()
+    {
+        if (noteTool != NoteTool.Eraser || !drawingNote) return;
+        drawingNote = false;
+        lastNotePoint = null;
+        HideActiveEraserPreview();
+        UpdateNoteStatus();
     }
 
     private Point ToOriginalPoint(Point point) => rotation switch
@@ -500,6 +581,7 @@ public partial class MainWindow
         try
         {
             monitorDpiScale = DisplayPixelMetrics.Get(this).DpiScale;
+            UpdateActiveEraserPreview();
             UpdateNoteStatus();
         }
         catch (StageException ex) { ShowNotesError(ex); }

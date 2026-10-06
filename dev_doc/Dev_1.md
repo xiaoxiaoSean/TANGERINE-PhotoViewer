@@ -100,7 +100,7 @@
 
 ## 12. 开发时的扩展入口
 
-**关于对话框：** 顶部常驻“关于”菜单调用 `About_Click()`，以 `ShowDialog()` 打开 `AboutWindow`。窗口使用黑底白字的只读 `TextBox`，允许选中文字并复制；产品名称、致谢、创始人、版本标签和项目地址都由 `LanguageManager` 读取。版本统一在 `TANGERINE-PhotoViewer.csproj` 的 `<Version>` 中设置，窗口从生成程序集的版本号读取并显示为三段形式，当前为 `1.0.0`。
+**关于对话框：** 顶部常驻“关于”菜单调用 `About_Click()`，以 `ShowDialog()` 打开 `AboutWindow`。窗口使用黑底白字的只读 `TextBox`，允许选中文字并复制；产品名称、致谢、创始人、版本标签和项目地址都由 `LanguageManager` 读取。版本统一在 `TANGERINE-PhotoViewer.csproj` 的 `<Version>` 中设置，窗口从生成程序集的版本号读取并显示为三段形式，当前为 `1.1.0`。
 
 - 新增图片解码格式：先确认 `NetVips` 或 `Magick.NET` 能依据内容读取；必要时修改 `ImageLoader.Load/CanDecode`。若还要出现在“默认应用”勾选列表，再修改 `DefaultAppAssociationService.Formats`。两者用途不同。
 - 新增主菜单功能：在 `MainWindow.xaml` 声明控件和事件；在 `MainWindow.xaml.cs` 添加处理方法，并在 `ApplyText()` 和 `RefreshMenu()` 中接入文字、显示条件。

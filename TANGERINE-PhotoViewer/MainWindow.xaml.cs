@@ -527,6 +527,7 @@ public partial class MainWindow : Window
         RestoreNotesHitTestingAfterPan();
     }
     private void Viewer_MouseLeave(object sender, MouseEventArgs e) => ClearTextFrameHover();
+    private void Viewer_LostMouseCapture(object sender, MouseEventArgs e) => CancelActiveEraserPreview();
     private void Viewer_ScrollChanged(object sender, System.Windows.Controls.ScrollChangedEventArgs e)
     {
         UpdateNavigatorViewport();
@@ -568,12 +569,32 @@ public partial class MainWindow : Window
         var track = ZoomSlider.Template.FindName("PART_Track", ZoomSlider) as Track;
         var x = track is null
             ? Math.Clamp(e.GetPosition(ZoomSlider).X / Math.Max(1, ZoomSlider.ActualWidth), 0, 1)
-            : Math.Clamp(e.GetPosition(track).X / Math.Max(1, track.ActualWidth), 0, 1);
+            : SliderPositionFraction(track, e.GetPosition(track).X);
         // Keep the styled ToolTip instance. Replacing it with a string makes WPF
         // create a default system-colored popup instead of the black/white one.
         if (ZoomSlider.ToolTip is ToolTip zoomToolTip)
+        {
+            zoomToolTip.PlacementTarget = ZoomSlider;
             zoomToolTip.Content = string.Format(LanguageManager.Get("ZoomPercent"),
                 (int)Math.Round(ScaleFromSlider(x) * 100));
+            zoomToolTip.HorizontalOffset = e.GetPosition(ZoomSlider).X;
+            zoomToolTip.VerticalOffset = -Math.Max(24, zoomToolTip.ActualHeight + 4);
+            zoomToolTip.IsOpen = true;
+        }
+    }
+
+    private void ZoomSlider_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (ZoomSlider.ToolTip is ToolTip zoomToolTip) zoomToolTip.IsOpen = false;
+    }
+
+    private static double SliderPositionFraction(Track track, double pointerX)
+    {
+        // Slider values span the track between the thumb's two possible center
+        // positions, rather than the track's outer edges.
+        var halfThumb = (track.Thumb?.ActualWidth ?? 0) / 2;
+        return Math.Clamp((pointerX - halfThumb) /
+            Math.Max(1, track.ActualWidth - 2 * halfThumb), 0, 1);
     }
 
     private void SetDefaultNavigatorSize()
@@ -832,7 +853,11 @@ public partial class MainWindow : Window
             RestoreNotesHitTestingAfterPan();
         }
     }
-    private void Window_Deactivated(object? sender, EventArgs e) => ZoomLabel.Visibility = Visibility.Collapsed;
+    private void Window_Deactivated(object? sender, EventArgs e)
+    {
+        ZoomLabel.Visibility = Visibility.Collapsed;
+        CancelActiveEraserPreview();
+    }
 
     private void QueueRender()
     {

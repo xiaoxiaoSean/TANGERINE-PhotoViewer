@@ -41,13 +41,13 @@
         <Label x:Name="NavigatorLimitLabel" Background="Black" Foreground="White" Visibility="Collapsed"/>
       </StackPanel>
       <Label x:Name="StatusLabel" Grid.Column="1" Background="Black" Foreground="White"/>
-      <Slider x:Name="ZoomSlider" Grid.Column="2" Width="200" Margin="12,0" Minimum="0" Maximum="1" IsMoveToPointEnabled="True" Visibility="Collapsed" VerticalAlignment="Center" ValueChanged="ZoomSlider_ValueChanged" MouseMove="ZoomSlider_MouseMove">
-        <Slider.ToolTip><ToolTip Background="Black" Foreground="White" BorderBrush="White"/></Slider.ToolTip>
+      <Slider x:Name="ZoomSlider" Grid.Column="2" Width="200" Margin="12,0" Minimum="0" Maximum="1" IsMoveToPointEnabled="True" Visibility="Collapsed" VerticalAlignment="Center" ValueChanged="ZoomSlider_ValueChanged" MouseEnter="ZoomSlider_MouseMove" MouseMove="ZoomSlider_MouseMove" MouseLeave="ZoomSlider_MouseLeave">
+        <Slider.ToolTip><ToolTip Background="Black" Foreground="White" BorderBrush="White" Placement="Relative"/></Slider.ToolTip>
       </Slider>
     </Grid>
     <Grid x:Name="PreviewArea" Background="Black" SizeChanged="PreviewArea_SizeChanged">
       <Image x:Name="EmptyLogo" Source="Assets/TANGERINE-PV.png" Stretch="Uniform" MaxWidth="320" MaxHeight="320" Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
-      <ScrollViewer x:Name="Viewer" Background="Transparent" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" SizeChanged="Viewer_SizeChanged" PreviewMouseWheel="Viewer_PreviewMouseWheel" PreviewMouseDown="Viewer_PreviewMouseDown" PreviewMouseMove="Viewer_PreviewMouseMove" PreviewMouseUp="Viewer_PreviewMouseUp" MouseLeave="Viewer_MouseLeave" ScrollChanged="Viewer_ScrollChanged">
+      <ScrollViewer x:Name="Viewer" Background="Transparent" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" SizeChanged="Viewer_SizeChanged" PreviewMouseWheel="Viewer_PreviewMouseWheel" PreviewMouseDown="Viewer_PreviewMouseDown" PreviewMouseMove="Viewer_PreviewMouseMove" PreviewMouseUp="Viewer_PreviewMouseUp" MouseLeave="Viewer_MouseLeave" LostMouseCapture="Viewer_LostMouseCapture" ScrollChanged="Viewer_ScrollChanged">
         <Canvas x:Name="Surface" Background="Transparent"><Image x:Name="Preview" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/><Image x:Name="Photo" Stretch="Fill" RenderOptions.BitmapScalingMode="HighQuality"/><Canvas x:Name="NotesCanvas" Background="Transparent" IsHitTestVisible="False"/></Canvas>
       </ScrollViewer>
       <Border x:Name="Navigator" Background="Black" BorderBrush="White" BorderThickness="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,0" Visibility="Collapsed" PreviewMouseWheel="Navigator_PreviewMouseWheel">

@@ -552,4 +552,7 @@
   <data name="TaskCompleted">
     <value>{0}已完成</value>
   </data>
+  <data name="DiameterAtPointer">
+    <value>指針位置：{0}像素</value>
+  </data>
 </root>
