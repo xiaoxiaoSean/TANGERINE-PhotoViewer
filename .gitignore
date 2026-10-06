@@ -232,6 +232,8 @@ _pkginfo.txt
 !?*.[Cc]ache/
 
 # Others
+TPV-out/fd/*.exe
+TPV-out/sc/*.exe
 ClientBin/
 ~$*
 *~
