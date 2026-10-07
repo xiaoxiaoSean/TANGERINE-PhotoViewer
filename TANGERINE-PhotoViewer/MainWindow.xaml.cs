@@ -8,6 +8,7 @@ using System.Windows.Threading;
 using System.Windows.Interop;
 using System.Windows.Controls.Primitives;
 using System.IO;
+using TANGERINE_PhotoViewer.DefaultApps;
 
 namespace TANGERINE_PhotoViewer;
 
@@ -26,11 +27,6 @@ public partial class MainWindow : Window
     private BitmapSource? source;
     private bool isGif;
     private bool large;
-    private bool fastRegionAccess;
-    private string? preparedRegionPath;
-    private CancellationTokenSource? cachePreparation;
-    private bool cachePreparationStopped;
-    private bool cachePreparationFailed;
     private int imageWidth;
     private int imageHeight;
     private long fileSize;
@@ -73,8 +69,6 @@ public partial class MainWindow : Window
         CancelNotesSave();
         operation?.Cancel();
         CancelDirectoryScan();
-        CancelCachePreparation();
-        if (preparedRegionPath is { } cachePath) _ = DeleteCacheWhenIdleAsync(cachePath);
         base.OnClosed(e);
     }
 
@@ -132,7 +126,7 @@ public partial class MainWindow : Window
         RefreshNotesMenu(loaded);
         if (!editingNotes)
             StopItem.Visibility = operation is not null || directoryScan is not null || gifWindow?.IsWorking == true
-                || cachePreparation is not null || savingNotes
+                || savingNotes
                 ? Visibility.Visible : Visibility.Collapsed;
         UpdateNavigationButtons();
     }
@@ -172,13 +166,12 @@ public partial class MainWindow : Window
         CancelNotesSave();
         renderDelay.Stop();
         CancelDirectoryScan();
-        CancelCachePreparation();
         renderSuspended = true;
         var token = BeginWork();
         SetTaskProgress("open", LanguageManager.Get("OpeningAction"), 0);
         var workGeneration = generation;
-        var previous = (path, source, isGif, large, fastRegionAccess, imageWidth, imageHeight, fileSize,
-            imageFormat, scale, rotation, preparedRegionPath, Photo.Source, Preview.Source,
+        var previous = (path, source, isGif, large, imageWidth, imageHeight, fileSize,
+            imageFormat, scale, rotation, Photo.Source, Preview.Source,
             Photo.Width, Photo.Height, Surface.Width, Surface.Height);
         var completed = false;
         try
@@ -192,19 +185,14 @@ public partial class MainWindow : Window
                 }
             });
             var (previewWidth, previewHeight) = PreviewPixelSize(Viewer.ActualWidth, Viewer.ActualHeight);
-            var result = await Task.Run(() => NativeWork.Run(() => ImageLoader.Load(
-                file, LargeFileBytes, previewWidth, previewHeight, token, progress), token), token);
+            var result = await Task.Run(() => ImageLoader.Load(
+                file, LargeFileBytes, previewWidth, previewHeight, token, progress), token);
             token.ThrowIfCancellationRequested();
             if (workGeneration != generation) return;
-            if (preparedRegionPath is { } oldCache) _ = DeleteCacheWhenIdleAsync(oldCache);
-            preparedRegionPath = null;
-            cachePreparationStopped = false;
-            cachePreparationFailed = false;
             path = file;
             source = result.Image;
             isGif = result.IsGif;
             large = result.IsLarge;
-            fastRegionAccess = result.FastRegionAccess;
             imageWidth = result.PixelWidth;
             imageHeight = result.PixelHeight;
             fileSize = result.FileSize;
@@ -243,7 +231,8 @@ public partial class MainWindow : Window
             if (workGeneration == generation)
             {
                 Restore(previous);
-                StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), ex.Message);
+                var detail = ex is StageException stage ? $"{stage.StageCode}: {stage.Message}" : ex.Message;
+                StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), detail);
             }
         }
         finally
@@ -259,15 +248,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private void Restore((string? Path, BitmapSource? Source, bool Gif, bool Large, bool FastRegionAccess, int Width, int Height,
-        long FileSize, string Format, double Scale, int Rotation, string? CachePath,
+    private void Restore((string? Path, BitmapSource? Source, bool Gif, bool Large, int Width, int Height,
+        long FileSize, string Format, double Scale, int Rotation,
         System.Windows.Media.ImageSource? PhotoSource, System.Windows.Media.ImageSource? PreviewSource,
         double PhotoWidth, double PhotoHeight, double SurfaceWidth, double SurfaceHeight) old)
     {
-        (path, source, isGif, large, fastRegionAccess, imageWidth, imageHeight, fileSize, imageFormat, scale, rotation) =
-            (old.Path, old.Source, old.Gif, old.Large, old.FastRegionAccess, old.Width, old.Height,
+        (path, source, isGif, large, imageWidth, imageHeight, fileSize, imageFormat, scale, rotation) =
+            (old.Path, old.Source, old.Gif, old.Large, old.Width, old.Height,
                 old.FileSize, old.Format, old.Scale, old.Rotation);
-        preparedRegionPath = old.CachePath;
         Photo.Source = old.PhotoSource;
         Preview.Source = old.PreviewSource;
         Photo.Width = old.PhotoWidth; Photo.Height = old.PhotoHeight;
@@ -291,14 +279,9 @@ public partial class MainWindow : Window
             token.ThrowIfCancellationRequested();
             if (workGeneration != generation) return;
             renderDelay.Stop();
-            path = null; source = null; isGif = false; large = false; fastRegionAccess = false; rotation = 0; scale = 1;
+            path = null; source = null; isGif = false; large = false; rotation = 0; scale = 1;
             ResetNotesForNewImage();
             CancelDirectoryScan();
-            CancelCachePreparation();
-            if (preparedRegionPath is { } oldCache) _ = DeleteCacheWhenIdleAsync(oldCache);
-            preparedRegionPath = null;
-            cachePreparationStopped = false;
-            cachePreparationFailed = false;
             neighboringImages = [];
             fileSize = 0; imageFormat = string.Empty;
             Photo.Source = null; Preview.Source = null; Surface.Width = 0; Surface.Height = 0;
@@ -327,8 +310,6 @@ public partial class MainWindow : Window
         CancelNotesSave();
         operation?.Cancel();
         CancelDirectoryScan();
-        cachePreparationStopped = true;
-        CancelCachePreparation();
         gifWindow?.StopWork();
 
         renderDelay.Stop();
@@ -389,6 +370,7 @@ public partial class MainWindow : Window
         nextScale = Math.Clamp(nextScale, MinimumScale(), Math.Max(64, MinimumScale()));
         var oldScale = scale;
         if (Math.Abs(nextScale - oldScale) < 0.0000001) return;
+        stopRequested = false;
         var point = anchor ?? new Point(Viewer.ViewportWidth / 2, Viewer.ViewportHeight / 2);
         point.X = Math.Clamp(point.X, 0, Viewer.ViewportWidth);
         point.Y = Math.Clamp(point.Y, 0, Viewer.ViewportHeight);
@@ -492,6 +474,7 @@ public partial class MainWindow : Window
 
     private void Viewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
     {
+        stopRequested = false;
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) Zoom(e.Delta > 0 ? 1.25 : 0.8, e.GetPosition(Viewer));
         else if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) Viewer.ScrollToHorizontalOffset(Viewer.HorizontalOffset - e.Delta);
         else Viewer.ScrollToVerticalOffset(Viewer.VerticalOffset - e.Delta);
@@ -514,6 +497,7 @@ public partial class MainWindow : Window
         if (HandleNotesMouseMove(e)) return;
         if (dragPoint is not { } old || (e.LeftButton != MouseButtonState.Pressed && e.MiddleButton != MouseButtonState.Pressed)) return;
         var current = e.GetPosition(Viewer);
+        stopRequested = false;
         Viewer.ScrollToHorizontalOffset(Viewer.HorizontalOffset + old.X - current.X);
         Viewer.ScrollToVerticalOffset(Viewer.VerticalOffset + old.Y - current.Y);
         dragPoint = current;
@@ -862,7 +846,7 @@ public partial class MainWindow : Window
     private void QueueRender()
     {
         renderDelay.Stop();
-        if (!large || source is null) return;
+        if (!large || source is null || stopRequested) return;
         if (scale <= MinimumScale() * 1.00001)
         {
             operation?.Cancel();
@@ -870,16 +854,8 @@ public partial class MainWindow : Window
             if (PreviewNeedsMorePixels()) renderDelay.Start();
             return;
         }
-        if (!fastRegionAccess)
-        {
-            if (preparedRegionPath is null)
-            {
-                Photo.Source = null;
-                if (path is not null && cachePreparation is null && !cachePreparationStopped && !cachePreparationFailed)
-                    _ = PrepareCacheAsync(path);
-                return;
-            }
-        }
+        // Every large image now requests only its visible viewport. A source
+        // without native random access is scanned by the bounded decoder.
         renderDelay.Start();
     }
 
@@ -903,97 +879,16 @@ public partial class MainWindow : Window
             (int)Math.Ceiling(Math.Min(int.MaxValue, physicalHeight * factor)));
     }
 
-    private void CancelCachePreparation()
-    {
-        cachePreparation?.Cancel();
-        cachePreparation = null;
-        ClearTaskProgress("cache");
-        RefreshMenu();
-    }
-
-    private async Task DeleteCacheWhenIdleAsync(string cachePath)
-    {
-        await regionDecodeGate.WaitAsync();
-        try
-        {
-            if (File.Exists(cachePath)) File.Delete(cachePath);
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-        finally { regionDecodeGate.Release(); }
-    }
-
-    private async Task PrepareCacheAsync(string file)
-    {
-        var work = new CancellationTokenSource();
-        cachePreparation = work;
-        var cachePath = Path.Combine(Path.GetTempPath(), "TangerinePhotoViewer",
-            "ImageCache", Guid.NewGuid().ToString("N") + ".tif");
-        RefreshMenu();
-        SetTaskProgress("cache", LanguageManager.Get("PreparingCacheAction"), 0);
-        var completed = false;
-        try
-        {
-            var progress = new Progress<int>(value =>
-            {
-                if (ReferenceEquals(cachePreparation, work) && !work.IsCancellationRequested && value > 0)
-                {
-                    SetTaskProgress("cache", LanguageManager.Get("PreparingCacheAction"), value);
-                }
-            });
-            await Task.Run(() =>
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
-                ImageLoader.PrepareRandomAccessCache(file, cachePath, work.Token, progress);
-            }, work.Token);
-            work.Token.ThrowIfCancellationRequested();
-            if (!ReferenceEquals(cachePreparation, work) || path != file) return;
-            preparedRegionPath = cachePath;
-            StatusLabel.Content = LanguageManager.Get("ImageCacheReady");
-            completed = true;
-            QueueRender();
-        }
-        catch (OperationCanceledException)
-        {
-            if (ReferenceEquals(cachePreparation, work)) StatusLabel.Content = LanguageManager.Get("Stopped");
-        }
-        catch (Exception ex)
-        {
-            if (ReferenceEquals(cachePreparation, work))
-            {
-                cachePreparationFailed = true;
-                StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), ex.Message);
-            }
-        }
-        finally
-        {
-            if (ReferenceEquals(cachePreparation, work))
-            {
-                if (completed) CompleteTaskProgress("cache",
-                    TaskCompletedMessage("PreparingCacheAction"));
-                else ClearTaskProgress("cache");
-            }
-            if (ReferenceEquals(cachePreparation, work)) cachePreparation = null;
-            if (cachePath != preparedRegionPath)
-                try { if (File.Exists(cachePath)) File.Delete(cachePath); }
-                catch (IOException) { }
-                catch (UnauthorizedAccessException) { }
-            work.Dispose();
-            RefreshMenu();
-        }
-    }
-
     private async Task RenderAsync()
     {
-        if (!large || path is null || source is null) return;
+        if (!large || path is null || source is null || stopRequested) return;
         if (scale <= MinimumScale() * 1.00001)
         {
             if (PreviewNeedsMorePixels()) await RefreshPreviewAsync();
             return;
         }
-        if (!fastRegionAccess && preparedRegionPath is null) return;
         var file = path;
-        var decodePath = fastRegionAccess ? file : preparedRegionPath!;
+        var decodePath = file;
         var token = BeginWork();
         SetTaskProgress("region", LanguageManager.Get("ReadingRegionAction"), 0);
         var workGeneration = generation;
@@ -1030,32 +925,40 @@ public partial class MainWindow : Window
             finally { regionDecodeGate.Release(); }
             token.ThrowIfCancellationRequested();
             if (workGeneration != generation || file != path || angle != rotation ||
-                (!fastRegionAccess && decodePath != preparedRegionPath) ||
                 Math.Abs(displayScale - scale * Math.Max(VisualTreeHelper.GetDpi(Viewer).DpiScaleX,
                     VisualTreeHelper.GetDpi(Viewer).DpiScaleY)) > 0.0000001 ||
                 scale <= MinimumScale() * 1.00001) return;
             if (stopRequested) return;
             if (tile is null)
             {
-                Photo.Source = null;
-                StatusLabel.Content = LanguageManager.Get("LargePreviewOnly");
-                completed = true;
-                return;
+                StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"),
+                    $"IMGL0003: {LanguageManager.Get("LargePreviewOnly")}");
             }
-            renderSuspended = true;
-            try
+            else
             {
-                Photo.Source = tile;
-                Photo.Width = viewport.Width * scale; Photo.Height = viewport.Height * scale;
-                Canvas.SetLeft(Photo, viewport.X * scale); Canvas.SetTop(Photo, viewport.Y * scale);
-                if (hoveredTextNote is not null) QueueInverseFrameRefresh();
+                renderSuspended = true;
+                try
+                {
+                    Photo.Source = tile;
+                    Photo.Width = viewport.Width * scale; Photo.Height = viewport.Height * scale;
+                    Canvas.SetLeft(Photo, viewport.X * scale); Canvas.SetTop(Photo, viewport.Y * scale);
+                    if (hoveredTextNote is not null) QueueInverseFrameRefresh();
+                }
+                finally { renderSuspended = false; }
+                StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
+                completed = true;
             }
-            finally { renderSuspended = false; }
-            StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
-            completed = true;
         }
         catch (OperationCanceledException) { if (workGeneration == generation) StatusLabel.Content = LanguageManager.Get("Stopped"); }
-        catch (Exception ex) { if (workGeneration == generation) StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), ex.Message); }
+        catch (Exception error)
+        {
+            if (workGeneration == generation && !token.IsCancellationRequested)
+            {
+                var detail = error is StageException stage ? $"{stage.StageCode}: {stage.Message}" :
+                    $"IMGL0003: {error.Message}";
+                StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), detail);
+            }
+        }
         finally
         {
             if (workGeneration == generation)

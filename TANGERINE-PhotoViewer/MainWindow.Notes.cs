@@ -103,7 +103,7 @@ public partial class MainWindow
             GifItem.Visibility = loaded && isGif ? Visibility.Visible : Visibility.Collapsed;
             SaveAsItem.Visibility = loaded && NotesDirty ? Visibility.Visible : Visibility.Collapsed;
             StopItem.Visibility = operation is not null || directoryScan is not null || gifWindow?.IsWorking == true ||
-                cachePreparation is not null || savingNotes ? Visibility.Visible : Visibility.Collapsed;
+                savingNotes ? Visibility.Visible : Visibility.Collapsed;
         }
         EditingDocumentItem.Header = noteTool == NoteTool.Text
             ? LanguageManager.Get("EditingWithTextTool")

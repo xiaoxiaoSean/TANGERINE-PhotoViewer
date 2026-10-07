@@ -75,6 +75,9 @@
   <data name="UnsupportedImage">
     <value>Unsupported image file</value>
   </data>
+  <data name="ImageDecodeFailed">
+    <value>Could not decode this image: {0}.</value>
+  </data>
   <data name="ZoomIn">
     <value>Zoom in</value>
   </data>
@@ -85,7 +88,7 @@
     <value>Zoom {0}%</value>
   </data>
   <data name="LargeFormatUnsupported">
-    <value>This format cannot be read by region above 100 MB.</value>
+    <value>This decoder cannot read this image within the current resource limits.</value>
   </data>
   <data name="DefaultAppsExecutableMissing">
     <value>The viewer executable is unavailable.</value>

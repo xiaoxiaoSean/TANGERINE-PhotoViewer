@@ -8,7 +8,7 @@
 | --- | --- |
 | `MainWindow.xaml`、`MainWindow.xaml.cs` | 主菜单、预览区、鼠标键盘操作、状态栏、异步任务调度、同目录切换 |
 | `ImageLoader.cs` | 图片解码、超大图片局部读取、GIF 帧导出、内容识别 |
-| `NativeWork.cs` | 在线程中运行原生图片处理代码，同时响应取消信号 |
+| `PsdCompositeReader.cs` | 按行读取 PSD/PSB 合成图，生成有界尺寸的预览与可见区域 |
 | `GifWindow.cs` | GIF 导出窗口与进度 |
 | `DetailsWindow.cs` | 图片详细信息窗口 |
 | `AboutWindow.cs` | 只读且可复制的关于对话框 |
@@ -30,17 +30,17 @@
 
 **思路：** 文件对话框、命令行、拖放和同目录切换共用 `OpenAsync(file)`，避免多套加载流程。新图片成功打开后才替换旧图片；失败或取消时用原状态恢复。
 
-**原理：** 菜单 `Open_Click` 显示 `OpenFileDialog`；拖放通过 `Window_PreviewDragOver`、`Window_PreviewDrop` 检查单个存在的文件。`OpenAsync` 保存旧状态、启动取消令牌，把 `ImageLoader.Load` 放在后台执行。加载器先读取文件头判断 GIF 和少数需显式指定的后备格式，再尝试 `NetVips`；普通图片在 `NetVips` 失败时改用 `Magick.NET`。返回冻结的 WPF `BitmapSource` 后，主窗口重置旋转与缩放、更新尺寸、关闭旧图片相关窗口，并异步扫描同目录。成功时旧图才被替换。打开对话框的过滤器只影响选择列表，不是解码依据。
+**原理：** `OpenAsync` 保存旧状态并在后台调用 `ImageLoader.Load`，成功后更新位图、尺寸、倍率和同目录列表；取消或失败时恢复旧图。解码器依据文件签名与内容识别格式。超过 100 MiB 或解码后超过 3200 万像素的图像只生成屏幕尺寸的预览；小图才允许普通完整解码。拖入新图片后会关闭旧图片相关窗口。打开对话框过滤器只影响选择列表。
 
-**调用：** 用户点“打开”、拖入单个文件，或执行 `TANGERINE-PhotoViewer.exe <图片路径>`。内部统一调用 `OpenAsync(file)`。`ImageLoader.Load(path, threshold, previewWidth, previewHeight, token, progress)` 返回位图、GIF 标记、尺寸、文件大小、格式、大文件标记及快速局部读取能力标记。
+**调用：** 用户点“打开”、拖入单个文件，或执行 `TANGERINE-PhotoViewer.exe <图片路径>`。内部统一调用 `OpenAsync(file)`。`ImageLoader.Load(path, threshold, previewWidth, previewHeight, token, progress)` 返回位图、GIF 标记、尺寸、文件大小、格式和大图标记。
 
-## 4. 大于 100 MiB 的图片与局部读取
+## 4. 大图清晰预览与放大
 
-**思路：** 以文件字节大小 `100 * 1024 * 1024` 为界；大文件先按当前图片浏览区的屏幕物理像素生成预览图，并在有限像素预算内保留少量缩放余量。最小倍率显示这张适屏图，窗口扩大或 DPI 变化使像素不足时异步重新生成。放大后按解码器的真实能力分流：可快速随机读取的分块格式直接取当前视口高清区域；其他格式在后台顺序解码一次并写成可随机读取的分块金字塔缓存，完成后读取高清区域。
+**思路：** 文件超过 100 MiB，或解码后超过 3200 万像素时，先按图片显示区的物理像素生成预览。放大及拖动时重新读取原图中的可见区域，按当前屏幕分辨率生成高清位图；初始预览只在高清区域尚未完成时作为占位显示。
 
-**原理：** `OpenAsync` 用 `VisualTreeHelper.GetDpi(Viewer)` 把浏览区大小换算成屏幕物理像素，并在 800 万像素的预览预算内最多提高到 1.5 倍采样密度；大文件由 `NetVips.Thumbnail` 缩小并用无损 PNG 传给 WPF，保留原始分辨率元数据。`ImageLoader.SupportsFastRegionAccess` 依据文件内容选中的 libvips 加载器读取 `ForeignFlags.PARTIAL` 能力；分块 TIFF 等真正支持局部读取的文件直接进入高清区域路径。若 TIFF 自带合适的金字塔缩小层，选择仍具有至少约 1.5 倍目标物理像素的层，然后由 libvips 的 Lanczos 缩放完成输出。区域渲染按 DPI 产生屏幕需要的像素，不再按原图裁剪面积直接退回低清预览；单次裁剪与缩放让 libvips 使用最多四个工作线程，不把图片按横条分别缩放，避免接缝。对条带 TIFF、常规 JPEG/PNG 等顺序格式，首次放大时 `PrepareCacheAsync` 在后台调用 `ImageLoader.PrepareRandomAccessCache`，使用顺序加载器把原图写成临时分块金字塔 BigTIFF；完成后读取可见区域。建缓存期间仍可缩放和拖动现有预览图，状态栏显示准备进度；取消、换图、卸载或关闭窗口会停止准备并清理临时文件。文件在处理期间被删除、失效或无法再读取时，异常会显示在状态栏。
+**原理：** `OpenAsync` 用 `VisualTreeHelper.GetDpi(Viewer)` 计算物理像素，并在 800 万像素预算内最多采用 1.5 倍采样。PSD/PSB 合成图由 `PsdCompositeReader` 按内容读取，Raw 与 PackBits 按行定位，ZIP 与 ZIP 预测压缩逐行解压；输出内存受显示尺寸约束。其他格式先使用 libvips 顺序缩放预览。放大时，支持 `ForeignFlags.PARTIAL` 的加载器直接裁剪可见区域；不支持随机区域读取的加载器按顺序解码、裁剪可见区域，再缩放与旋转。libvips 无法处理时使用 Magick.NET 回退，并限制其像素缓存的内存、映射和磁盘资源。所有路径都从原始文件生成当前视口像素；若读取失败，保留现有预览并报告错误。TIFF 金字塔层仅在像素数足以覆盖输出尺寸时选用。
 
-**调用：** 用户正常打开大文件即可；最小倍率显示按浏览区物理分辨率制作的预览，预览区扩大时 `QueueRender()` → `RefreshPreviewAsync()` → `ImageLoader.LoadPreview(...)` 更新它。可局部读取的格式在放大或移动时触发 `QueueRender()` → `RenderAsync()` → `ImageLoader.LoadRegionParallelAsync(...)`。其他格式首次放大时触发 `QueueRender()` → `PrepareCacheAsync()` → `ImageLoader.PrepareRandomAccessCache(...)`；缓存完成后自动调用区域渲染。创建缓存需要一次完整顺序扫描和足够的临时磁盘空间，10–20 GB 文件可能花较长时间，但不会重复启动多路全图解码。
+**调用：** `QueueRender()` → `RenderAsync()` → `ImageLoader.LoadRegionParallelAsync(...)`。最小倍率或显示区扩大时 `RefreshPreviewAsync()` → `ImageLoader.LoadPreview(...)`。顺序格式的定位时间取决于所需扫描的行数；Magick.NET 回退可能需要大量临时磁盘，第三方解码器的额外内存分配不一定受像素缓存限额约束。PSD/PSB 必须含可读取的合成图；无法保证任意格式、任意损坏文件或任意大小都能成功打开。
 
 ## 5. 缩放、最小倍率和旋转
 
@@ -86,7 +86,7 @@
 
 **思路：** 用户可以在主界面停止打开、卸载、目录扫描、局部读取和 GIF 导出等工作，避免后台结果在取消后覆盖当前界面。
 
-**原理：** `BeginWork()` 为主图片操作创建 `CancellationTokenSource` 并递增 `generation`；`EndWork()` 清理当前操作。`Stop_Click()` 取消主操作、目录扫描和 GIF 导出，并停止待执行的延迟渲染。回调在写入 UI 前检查令牌、代次或当前文件。打开失败/取消由 `Restore()` 恢复旧图片。`Progress<int>` 把解码或导出百分比送到下方 `StatusLabel`。`NativeWork.Run()` 在后台 STA 线程执行图像任务，并以短周期检查取消信号，使等待方尽快返回。
+**原理：** `BeginWork()` 创建取消令牌并递增代次，`Stop_Click()` 取消当前图片操作、目录扫描及 GIF 工作，停止延迟渲染。解码回调更新界面前检查令牌、代次和当前文件；已取消的结果不会替换显示内容。PSD 逐行读取检查取消；libvips 使用进度及中止信号。Magick.NET 或其他原生调用可能只能在当前调用结束后响应取消，因此不能保证即时强制终止。
 
 **调用：** 操作进行中主菜单显示“停止工作”；点击调用 `Stop_Click()`。GIF 和系统设置窗口也有各自的停止按钮。需注意：取消会尽快停止等待和后续 UI 更新，但正在执行且无法被原生库中断的单次调用可能仍在后台运行一段时间；这不等同于强杀原生线程。目录扫描目前没有逐文件百分比显示。
 
@@ -109,7 +109,7 @@
 
 ## 13. 当前实现边界
 
-- 对大于 100 MiB 且加载器没有 `ForeignFlags.PARTIAL` 能力的格式，首次放大需要顺序扫描原图并创建临时分块缓存，完成后才显示高清局部细节。TIFF 是否可以直接局部读取取决于内部是否分块，而不是 `.tif` / `.tiff` 扩展名。
-- 目录扫描在图片打开后执行一次；目录后续变化不会被实时监视，重新打开图片会重新扫描。
-- 停止原生解码时采用取消信号与结果丢弃，不保证瞬间终止正在运行的原生函数。
-- 最小倍率当前采用完整图片适合预览区的计算方式；文档按代码行为描述。
+- 不支持随机区域读取的顺序格式，每次放大或移动都可能从文件开头扫描到可见区域；PSD/PSB ZIP 也是如此。清晰度来自原图，速度取决于压缩结构和存储设备。
+- Magick.NET 回退限制像素缓存资源，但外部解码库可能另行分配内存；资源不足或解码失败时显示实际错误，不以模糊预览宣称高清读取成功。
+- 目录扫描只在打开图片后执行一次；后续目录变化不会实时更新。
+- 原生解码并非所有阶段都支持即时中止；停止工作会阻止旧结果覆盖当前界面。

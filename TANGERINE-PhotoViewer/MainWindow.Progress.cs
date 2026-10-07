@@ -46,9 +46,8 @@ public partial class MainWindow
 
     private void ClearActiveImageTaskProgress()
     {
-        // A new view request supersedes decoding callbacks, but an already
-        // finished cache or opening task may remain visible beside the next
-        // running image task until the next explicit user operation.
+        // A new view request supersedes decoding callbacks. Finished tasks
+        // remain visible until the next explicit user operation.
         activeTaskProgress.Remove("open");
         activeTaskProgress.Remove("region");
         activeTaskProgress.Remove("preview");

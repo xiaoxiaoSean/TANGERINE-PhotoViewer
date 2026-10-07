@@ -15,7 +15,7 @@ It supports following formats,and we use some solutions and nuget to view the ph
 | AVIF      | `.avif`                        | NetVips; Magick.NET fallback                                  |
 | HEIF      | `.heic`, `.heif`               | NetVips; Magick.NET fallback                                  |
 | JPEG 2000 | `.jp2`, `.j2k`                 | NetVips; Magick.NET fallback                                  |
-| Photoshop | `.psd`                         | NetVips; Magick.NET fallback with content-based PSD detection |
+| Photoshop | `.psd`, `.psb`                 | Merged composite: bounded `PsdCompositeReader`; Magick.NET fallback for unsupported layouts |
 | TGA       | `.tga`                         | NetVips; Magick.NET fallback with content-based TGA detection |
 | OpenEXR   | `.exr`                         | NetVips; Magick.NET fallback                                  |
 | Radiance  | `.hdr`                         | NetVips; Magick.NET fallback                                  |

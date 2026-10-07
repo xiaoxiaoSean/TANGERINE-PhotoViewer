@@ -75,6 +75,9 @@
   <data name="UnsupportedImage">
     <value>不支援的圖片檔案</value>
   </data>
+  <data name="ImageDecodeFailed">
+    <value>無法解碼此圖片：{0}。</value>
+  </data>
   <data name="ZoomIn">
     <value>放大</value>
   </data>
@@ -85,7 +88,7 @@
     <value>缩放 {0}%</value>
   </data>
   <data name="LargeFormatUnsupported">
-    <value>此格式无法按区域读取超过 100 MB 的图片。</value>
+    <value>目前解碼器無法在資源限制內讀取這張圖片。</value>
   </data>
   <data name="DefaultAppsExecutableMissing">
     <value>查看器程序文件不可用。</value>

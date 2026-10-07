@@ -3,6 +3,7 @@ using NetVips;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Buffers.Binary;
 using Microsoft.Win32.SafeHandles;
 using TANGERINE_PhotoViewer.DefaultApps;
 using VipsImage = NetVips.Image;
@@ -30,6 +31,9 @@ internal static class AnnotationExport
     {
         try
         {
+            // The Photoshop merged-image reader exports pixels, not a layered
+            // Photoshop document. Offer PNG instead of a misleading PSD/PSB saver.
+            if (IsPhotoshopContent(sourcePath)) return false;
             var extension = Path.GetExtension(sourcePath);
             if (string.IsNullOrWhiteSpace(extension)) return false;
             return MagickFormatInfo.Create(sourcePath)?.SupportsWriting == true;
@@ -91,26 +95,66 @@ internal static class AnnotationExport
             progress.Report(1);
             token.ThrowIfCancellationRequested();
 
-            // Large multipage TIFFs must never enter MagickImageCollection: it
-            // eagerly decodes every page and can exhaust native process memory.
-            // libvips holds uniform pages as one lazy vertical image instead.
-            var multipage = IsMultipage(source);
-            progress.Report(5);
-            if (multipage)
+            // The reader that opens the source must also supply the pixels to
+            // the exporter. In particular, libvips cannot reopen many PSB files
+            // that the bounded Photoshop reader displays successfully.
+            PsdCompositeReader.Info? photoshop = null;
+            if (IsPhotoshopContent(source))
             {
-                var isTiff = Path.GetExtension(source).Equals(".tif", StringComparison.OrdinalIgnoreCase) ||
-                    Path.GetExtension(source).Equals(".tiff", StringComparison.OrdinalIgnoreCase);
-                if (isTiff)
+                try { photoshop = PsdCompositeReader.Inspect(source, token); }
+                catch (NotSupportedException)
                 {
+                    // The generic decoder may understand modes outside the
+                    // bounded composite reader's supported subset.
+                }
+            }
+            var multipage = photoshop is null && IsMultipage(source);
+            progress.Report(5);
+            if (photoshop is { } psdInfo)
+            {
+                var rawPath = Path.Combine(Path.GetTempPath(), "TangerinePhotoViewer",
+                    "AnnotationCache", Guid.NewGuid().ToString("N") + ".rgba");
+                Directory.CreateDirectory(Path.GetDirectoryName(rawPath)!);
+                try
+                {
+                    PsdCompositeReader.WriteInterleavedRgba(source, psdInfo, rawPath,
+                        token, new SynchronousProgress(value =>
+                            progress.Report(5 + Math.Clamp(value, 0, 100) * 9 / 100)));
+                    token.ThrowIfCancellationRequested();
+                    using var raw = VipsImage.Rawload(rawPath, psdInfo.Width,
+                        psdInfo.Height, 4, format: NetVips.Enums.BandFormat.Uchar,
+                        interpretation: NetVips.Enums.Interpretation.Srgb,
+                        memory: false, access: NetVips.Enums.Access.Sequential);
                     SaveWithVips(source, temporaryPath, rotation, tiles, textSource,
-                        token, progress, multipageTiff: true);
+                        token, progress, suppliedSource: raw);
+                }
+                finally { TryDelete(rawPath); }
+            }
+            else if (multipage)
+            {
+                if (IsTiffContent(source))
+                {
+                    try
+                    {
+                        SaveWithVips(source, temporaryPath, rotation, tiles, textSource,
+                            token, progress, multipageTiff: true);
+                    }
+                    catch (Exception error) when (error is VipsException ||
+                        error is StageException { StageCode: "ANNS0002" })
+                    {
+                        TryDelete(temporaryPath);
+                        var fallbackTiles = textSource is { HasVisibleText: true }
+                            ? CombineSmallTextTiles(tiles, textSource,
+                                ReadDimensions(source), token, progress) : tiles;
+                        SaveMultipage(source, temporaryPath, rotation, fallbackTiles,
+                            token, progress);
+                    }
                 }
                 else
                 {
-                    if (!CanUseMagickFallback(source, destination, multipage: true))
-                        throw new StageException("ANNS0002", LanguageManager.Get("AnnotationExportUnsupported")); // ANNS0002
                     var multipageTiles = textSource is null ? tiles :
-                        CombineSmallTextTiles(tiles, textSource, source, token, progress);
+                        CombineSmallTextTiles(tiles, textSource,
+                            ReadDimensions(source), token, progress);
                     SaveMultipage(source, temporaryPath, rotation, multipageTiles, token, progress);
                 }
             }
@@ -120,24 +164,23 @@ internal static class AnnotationExport
                 {
                     SaveWithVips(source, temporaryPath, rotation, tiles, textSource, token, progress);
                 }
-                catch (Exception error) when ((error is VipsException ||
-                    error is StageException { StageCode: "ANNS0002" }) &&
-                    CanUseMagickFallback(source, destination, multipage: false))
+                catch (Exception error) when (error is VipsException ||
+                    error is StageException { StageCode: "ANNS0002" })
                 {
-                    // Some coders can read the source in libvips but cannot
-                    // write its original format after an RGBA text overlay.
-                    // Use the bounded decoder for small single-frame files;
-                    // never let this fallback eagerly load a large image.
+                    // A libvips loader or saver can be absent even when Magick
+                    // supports the file. Its disk-backed pixel cache keeps the
+                    // general fallback within the configured memory budget.
                     TryDelete(temporaryPath);
                     var fallbackTiles = textSource is { HasVisibleText: true }
-                        ? CombineSmallTextTiles(tiles, textSource, source, token, progress)
+                        ? CombineSmallTextTiles(tiles, textSource,
+                            ReadDimensions(source), token, progress)
                         : tiles;
                     SaveWithMagick(source, temporaryPath, rotation, fallbackTiles, token, progress);
                 }
             }
 
             token.ThrowIfCancellationRequested();
-            VerifyDimensions(source, temporaryPath, rotation);
+            VerifyDimensions(source, temporaryPath, rotation, photoshop, multipage);
             token.ThrowIfCancellationRequested();
             File.Move(temporaryPath, destination, true);
             temporaryPath = null;
@@ -156,81 +199,78 @@ internal static class AnnotationExport
         finally { if (temporaryPath is not null) TryDelete(temporaryPath); }
     }
 
-    private static bool CanUseMagickFallback(string source, string destination, bool multipage)
-    {
-        try
-        {
-            // A highly compressed source may be small on disk while its decoded
-            // pixels require many gigabytes. Magick eagerly holds the full image.
-            if (new FileInfo(source).Length >= 256L * 1024 * 1024 ||
-                MagickFormatInfo.Create(destination)?.SupportsWriting != true)
-                return false;
-            const ulong decodedLimit = 256UL * 1024 * 1024;
-            if (!multipage)
-            {
-                var info = new MagickImageInfo(source);
-                return (ulong)info.Width * info.Height * 4 < decodedLimit;
-            }
-            // ReadCollection returns frame headers without a decoded image
-            // collection. Bound both frame count and total decoded pixels before
-            // allowing the older Magick path for small GIFs and similar files.
-            ulong decodedBytes = 0;
-            var frameCount = 0;
-            foreach (var frame in MagickImageInfo.ReadCollection(source))
-            {
-                if (++frameCount > 256) return false;
-                var frameBytes = (ulong)frame.Width * frame.Height * 4;
-                if (frameBytes >= decodedLimit - decodedBytes) return false;
-                decodedBytes += frameBytes;
-            }
-            return frameCount > 0;
-        }
-        catch { return false; }
-    }
-
     private static bool IsMultipage(string source)
     {
-        var extension = Path.GetExtension(source).ToLowerInvariant();
-        // A Vips header read is cheap even for a huge TIFF. Loading the entire
-        // MagickImageCollection here would eagerly decode every page before the
-        // streaming single-page path has a chance to run.
-        if (extension is ".gif" or ".apng" or ".pdf" or ".psd" or ".tif" or ".tiff" or
-            ".webp" or ".heic" or ".heif" or ".avif")
+        // Probe the decoder's page metadata, not the filename. A renamed TIFF
+        // or GIF must take the same export path as one with its usual extension.
+        try
         {
-            try
-            {
-                using var image = VipsImage.NewFromFile(source, access: NetVips.Enums.Access.Sequential);
-                if (image.Contains("n-pages")) return Convert.ToInt32(image.Get("n-pages"), CultureInfo.InvariantCulture) > 1;
-            }
-            catch (VipsException) { return IsMultipageFallback(source); }
-            // libvips read the header successfully. A missing page count means
-            // one page; enumerating the file again is unnecessary and can hold
-            // a small export before its first output write.
-            return false;
+            using var image = VipsImage.NewFromFile(source, access: NetVips.Enums.Access.Sequential);
+            return image.Contains("n-pages") &&
+                Convert.ToInt32(image.Get("n-pages"), CultureInfo.InvariantCulture) > 1;
         }
-        return false;
+        catch (VipsException) { return IsMultipageFallback(source); }
     }
 
     private static bool IsMultipageFallback(string source)
     {
-        // A native header probe for very large inputs must not traverse an
-        // unbounded frame collection if libvips could not read the header.
-        if (new FileInfo(source).Length >= 256L * 1024 * 1024)
-            throw new StageException("ANNS0002", LanguageManager.Get("AnnotationExportUnsupported")); // ANNS0002
-        return MagickImageInfo.ReadCollection(source).Take(2).Count() > 1;
+        // Header enumeration is bounded to two entries. It does not decode a
+        // frame collection, even for a very large source file.
+        using var stream = new FileStream(source, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        var format = ImageLoader.DetectFallbackFormat(stream);
+        LimitMagickExportCache();
+        var frames = format == MagickFormat.Unknown
+            ? MagickImageInfo.ReadCollection(stream)
+            : MagickImageInfo.ReadCollection(stream,
+                new MagickReadSettings { Format = format });
+        return frames.Take(2).Count() > 1;
+    }
+
+    private static bool IsTiffContent(string source)
+    {
+        using var stream = new FileStream(source, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.RandomAccess);
+        Span<byte> signature = stackalloc byte[4];
+        if (stream.Read(signature) != signature.Length) return false;
+        return signature.SequenceEqual(new byte[] { 0x49, 0x49, 0x2a, 0x00 }) ||
+            signature.SequenceEqual(new byte[] { 0x4d, 0x4d, 0x00, 0x2a }) ||
+            signature.SequenceEqual(new byte[] { 0x49, 0x49, 0x2b, 0x00 }) ||
+            signature.SequenceEqual(new byte[] { 0x4d, 0x4d, 0x00, 0x2b });
+    }
+
+    private static bool IsPhotoshopContent(string source)
+    {
+        using var stream = new FileStream(source, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.RandomAccess);
+        Span<byte> header = stackalloc byte[6];
+        return stream.Read(header) == header.Length &&
+            header[..4].SequenceEqual("8BPS"u8) &&
+            BinaryPrimitives.ReadUInt16BigEndian(header[4..]) is 1 or 2;
+    }
+
+    private static bool IsGifContent(string source)
+    {
+        using var stream = new FileStream(source, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.RandomAccess);
+        Span<byte> signature = stackalloc byte[6];
+        return stream.Read(signature) == signature.Length &&
+            (signature.SequenceEqual("GIF87a"u8) || signature.SequenceEqual("GIF89a"u8));
+    }
+
+    private sealed class SynchronousProgress(Action<int> report) : IProgress<int>
+    {
+        public void Report(int value) => report(value);
     }
 
     private static AnnotationTile[] CombineSmallTextTiles(AnnotationTile[] brushTiles,
-        TextAnnotationSource textSource, string sourcePath, CancellationToken token,
+        TextAnnotationSource textSource, (int Width, int Height) dimensions, CancellationToken token,
         IProgress<int> progress)
     {
-        // This fallback is only entered after the whole multipage source was
-        // bounded below 256 MiB decoded. Text is sampled into source-pixel tiles
-        // with a separate 256 MiB cap, preserving small animated GIF support.
+        // Text is sampled into source-pixel tiles with a separate memory cap.
         const long textLimit = 256L * 1024 * 1024;
-        var info = new MagickImageInfo(sourcePath);
-        var width = checked((int)info.Width);
-        var height = checked((int)info.Height);
+        var width = dimensions.Width;
+        var height = dimensions.Height;
         var results = new List<AnnotationTile>(brushTiles);
         var occupied = new HashSet<(int X, int Y)>();
         foreach (var bound in textSource.SourceBounds)
@@ -263,14 +303,16 @@ internal static class AnnotationExport
 
     private static void SaveWithVips(string sourcePath, string outputPath, int rotation,
         AnnotationTile[] tiles, TextAnnotationSource? textSource,
-        CancellationToken token, IProgress<int> progress, bool multipageTiff = false)
+        CancellationToken token, IProgress<int> progress, bool multipageTiff = false,
+        VipsImage? suppliedSource = null)
     {
         // A bounded worker/cache budget prevents libvips from retaining large decoded
         // strips while a huge source is being encoded. The source stays lazy.
         NetVips.NetVips.Concurrency = Math.Clamp(Environment.ProcessorCount, 2, 4);
         NetVips.Cache.MaxMem = 128UL * 1024 * 1024;
         NetVips.Cache.MaxFiles = 32;
-        using var original = OpenVipsSource(sourcePath, multipageTiff);
+        using var original = suppliedSource is null
+            ? OpenVipsSource(sourcePath, multipageTiff) : suppliedSource.Copy();
         token.ThrowIfCancellationRequested();
         var pageHeight = multipageTiff ? original.PageHeight : original.Height;
         if (pageHeight <= 0 || original.Height % pageHeight != 0)
@@ -705,13 +747,20 @@ internal static class AnnotationExport
     private static void SaveMultipage(string sourcePath, string outputPath, int rotation,
         AnnotationTile[] tiles, CancellationToken token, IProgress<int> progress)
     {
-        using var frames = new MagickImageCollection(sourcePath);
+        LimitMagickExportCache();
+        using var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        var format = ImageLoader.DetectFallbackFormat(input);
+        using var frames = format == MagickFormat.Unknown
+            ? new MagickImageCollection(input)
+            : new MagickImageCollection(input,
+                new MagickReadSettings { Format = format });
         if (frames.Count == 0)
             throw new StageException("ANNS0001", LanguageManager.Get("AnnotationExportInvalid")); // ANNS0001
         // GIF frames can be sparse rectangles relative to their page canvas.
         // Coalescing reconstructs those pixels before annotating the displayed
         // first frame, and preserves the frame count, delays, and loop metadata.
-        if (Path.GetExtension(sourcePath).Equals(".gif", StringComparison.OrdinalIgnoreCase))
+        if (IsGifContent(sourcePath))
             frames.Coalesce();
         for (var i = 0; i < frames.Count; i++)
         {
@@ -728,13 +777,38 @@ internal static class AnnotationExport
     private static void SaveWithMagick(string sourcePath, string outputPath, int rotation,
         AnnotationTile[] tiles, CancellationToken token, IProgress<int> progress)
     {
-        using var image = new MagickImage(sourcePath);
+        LimitMagickExportCache();
+        using var image = OpenMagickSource(sourcePath);
         token.ThrowIfCancellationRequested();
         CompositeTiles(image, tiles, token, progress);
         if (rotation != 0) image.Rotate(rotation);
         token.ThrowIfCancellationRequested();
         image.Write(outputPath);
         progress.Report(95);
+    }
+
+    private static MagickImage OpenMagickSource(string sourcePath)
+    {
+        // A few formats need an explicit content-derived hint when opened from
+        // a stream or from a filename with an unrelated extension.
+        using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        var format = ImageLoader.DetectFallbackFormat(source);
+        return format == MagickFormat.Unknown
+            ? new MagickImage(source)
+            : new MagickImage(source, new MagickReadSettings { Format = format });
+    }
+
+    private static void LimitMagickExportCache()
+    {
+        // ImageMagick may spill decoded pixels to disk for formats without a
+        // libvips loader. Keep managed and native memory bounded per process.
+        const ulong memoryBudget = 256UL * 1024 * 1024;
+        ResourceLimits.Memory = Math.Min(ResourceLimits.Memory, memoryBudget);
+        ResourceLimits.Area = Math.Min(ResourceLimits.Area, memoryBudget / 4);
+        ResourceLimits.Disk = Math.Min(ResourceLimits.Disk, 64UL * 1024 * 1024 * 1024);
+        ResourceLimits.Thread = Math.Min(ResourceLimits.Thread,
+            (uint)Math.Clamp(Environment.ProcessorCount, 2, 4));
     }
 
     private static void CompositeTiles(IMagickImage<byte> image, AnnotationTile[] tiles,
@@ -761,33 +835,46 @@ internal static class AnnotationExport
         }
     }
 
-    private static void VerifyDimensions(string sourcePath, string outputPath, int rotation)
+    private static void VerifyDimensions(string sourcePath, string outputPath, int rotation,
+        PsdCompositeReader.Info? photoshop, bool multipage)
     {
         try
         {
-            var source = new MagickImageInfo(sourcePath);
-            var output = new MagickImageInfo(outputPath);
-            var expectedWidth = rotation is 90 or 270 ? source.Height : source.Width;
-            var expectedHeight = rotation is 90 or 270 ? source.Width : source.Height;
-            if (output.Width != expectedWidth || output.Height != expectedHeight)
+            var (outputWidth, outputHeight) = ReadDimensions(outputPath);
+            var (sourceWidth, sourceHeight) = photoshop is { } info
+                ? (info.Width, info.Height) : ReadDimensions(sourcePath);
+            var expectedWidth = rotation is 90 or 270 ? sourceHeight : sourceWidth;
+            var expectedHeight = rotation is 90 or 270 ? sourceWidth : sourceHeight;
+            if (outputWidth != expectedWidth || outputHeight != expectedHeight)
                 throw new StageException("ANNS0004", LanguageManager.Get("AnnotationExportVerificationFailed")); // ANNS0004
-            if (IsMultipage(sourcePath))
+            if (multipage)
             {
-                var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
-                if (extension is ".tif" or ".tiff")
+                if (IsTiffContent(sourcePath))
                 {
-                    using var sourceHeader = VipsImage.NewFromFile(sourcePath, access: NetVips.Enums.Access.Sequential);
+                    using var sourceHeader = VipsImage.Tiffload(sourcePath, n: -1,
+                        access: NetVips.Enums.Access.Sequential);
                     using var outputHeader = VipsImage.NewFromFile(outputPath, access: NetVips.Enums.Access.Sequential);
-                    var sourcePages = sourceHeader.Contains("n-pages")
-                        ? Convert.ToInt32(sourceHeader.Get("n-pages"), CultureInfo.InvariantCulture) : 1;
+                    var sourcePages = sourceHeader.PageHeight > 0
+                        ? sourceHeader.Height / sourceHeader.PageHeight : 1;
                     var outputPages = outputHeader.Contains("n-pages")
                         ? Convert.ToInt32(outputHeader.Get("n-pages"), CultureInfo.InvariantCulture) : 1;
                     if (sourcePages != outputPages)
                         throw new StageException("ANNS0004", LanguageManager.Get("AnnotationExportVerificationFailed")); // ANNS0004
                 }
-                else if (MagickImageInfo.ReadCollection(sourcePath).Count() !=
-                    MagickImageInfo.ReadCollection(outputPath).Count())
-                    throw new StageException("ANNS0004", LanguageManager.Get("AnnotationExportVerificationFailed")); // ANNS0004
+                else
+                {
+                    using var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    using var output = new FileStream(outputPath, FileMode.Open, FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    var sourceFormat = ImageLoader.DetectFallbackFormat(input);
+                    var sourceFrames = sourceFormat == MagickFormat.Unknown
+                        ? MagickImageInfo.ReadCollection(input)
+                        : MagickImageInfo.ReadCollection(input,
+                            new MagickReadSettings { Format = sourceFormat });
+                    if (sourceFrames.Count() != MagickImageInfo.ReadCollection(output).Count())
+                        throw new StageException("ANNS0004", LanguageManager.Get("AnnotationExportVerificationFailed")); // ANNS0004
+                }
             }
         }
         catch (StageException) { throw; }
@@ -795,6 +882,25 @@ internal static class AnnotationExport
         {
             throw new StageException("ANNS0004", LanguageManager.Get("AnnotationExportVerificationFailed"), error); // ANNS0004
         }
+    }
+
+    private static (int Width, int Height) ReadDimensions(string path)
+    {
+        try
+        {
+            using var image = VipsImage.NewFromFile(path,
+                access: NetVips.Enums.Access.Sequential);
+            if (image.Width > 0 && image.Height > 0)
+                return (image.Width, image.Height);
+        }
+        catch (VipsException) { /* A second installed codec can read the header. */ }
+        using var source = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        var format = ImageLoader.DetectFallbackFormat(source);
+        var metadata = format == MagickFormat.Unknown
+            ? new MagickImageInfo(source)
+            : new MagickImageInfo(source, new MagickReadSettings { Format = format });
+        return (checked((int)metadata.Width), checked((int)metadata.Height));
     }
 
     private static void TryDelete(string path)
