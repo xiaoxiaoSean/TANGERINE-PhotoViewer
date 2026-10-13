@@ -11,7 +11,8 @@ namespace TANGERINE_PhotoViewer;
 
 public partial class MainWindow
 {
-    private enum NoteTool { Brush, Eraser, Text }
+    private enum NoteTool { Brush, Eraser, Text, Crop, Rotate }
+    private enum SaveNotesResult { Saved, Canceled, Failed }
 
     private const int NoteTileSize = 256;
 
@@ -61,11 +62,56 @@ public partial class MainWindow
     private long savedNotesVersion;
     private CancellationTokenSource? notesSaveOperation;
 
-    // The version changes on every stroke, including strokes that an eraser
-    // later removes completely. No content means an effectively clean image;
-    // otherwise the saved version distinguishes later unsaved edits.
-    private bool NotesDirty => (noteTiles.Count > 0 || textNotes.Count > 0) &&
-        notesVersion != savedNotesVersion;
+    // An edit remains unsaved even when an eraser removes the last visible mark.
+    // Undoing to the saved history version makes the image clean again.
+    private bool NotesDirty => notesVersion != savedNotesVersion;
+
+    private bool unsavedDecisionActive;
+
+    /// <summary>
+    /// Guards every action that would replace or discard the current image.
+    /// A successful Save As is awaited before the requested action continues.
+    /// A failed export offers retry, discard, and cancel; canceling the file
+    /// dialog simply keeps the current image and its edits.
+    /// </summary>
+    private async Task<bool> ConfirmUnsavedChangesAsync(string actionKey)
+    {
+        if (!NotesDirty) return true;
+        if (unsavedDecisionActive) return false;
+        unsavedDecisionActive = true;
+        try
+        {
+            var answer = MessageBox.Show(this, LanguageManager.Get("UnsavedChangesPrompt"),
+                LanguageManager.Get("AppTitle"), MessageBoxButton.YesNoCancel, MessageBoxImage.Warning);
+            if (answer == MessageBoxResult.No) return true;
+            if (answer != MessageBoxResult.Yes) return false;
+
+            while (true)
+            {
+                var saveResult = await SaveNotesAsAsync();
+                if (saveResult == SaveNotesResult.Saved) return true;
+                if (saveResult == SaveNotesResult.Canceled) return false;
+
+                // The buttons name the pending action explicitly, so a discard
+                // choice cannot be confused with another Save As attempt.
+                var failureWindow = new UnsavedSaveFailureWindow(LanguageManager.Get(actionKey))
+                    { Owner = this };
+                failureWindow.ShowDialog();
+                if (failureWindow.SelectedChoice == UnsavedSaveFailureWindow.Choice.Discard) return true;
+                if (failureWindow.SelectedChoice != UnsavedSaveFailureWindow.Choice.Retry) return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowNotesError(new StageException("NOTES0006",
+                LanguageManager.Get("UnsavedChangesPromptFailed"), ex)); // NOTES0006
+            return false;
+        }
+        finally
+        {
+            unsavedDecisionActive = false;
+        }
+    }
 
     private void ApplyNotesText()
     {
@@ -73,11 +119,20 @@ public partial class MainWindow
         BrushItem.Header = EditBrushItem.Header = LanguageManager.Get("Brush");
         BrushEraserItem.Header = EditEraserItem.Header = LanguageManager.Get("BrushEraser");
         TextItem.Header = EditTextItem.Header = LanguageManager.Get("TextTool");
+        CropItem.Header = EditCropItem.Header = LanguageManager.Get("CropTool");
+        EditRotateItem.Header = EditRotateToolItem.Header = LanguageManager.Get("RotateEditTool");
+        CropRecenterButton.Content = LanguageManager.Get("CropRecenter");
+        CropBoundaryTipText.Text = LanguageManager.Get("CropBoundaryTip");
+        RotateEditLeftButton.Content = LanguageManager.Get("RotateLeft");
+        RotateEditRightButton.Content = LanguageManager.Get("RotateRight");
         TextSettingsItem.Header = LanguageManager.Get("TextSettings");
         TextFontSizeItem.Header = LanguageManager.Get("TextFontSize");
         SaveAsItem.Header = LanguageManager.Get("SaveAs");
         SwitchToolItem.Header = LanguageManager.Get("SwitchTool");
         ExitEditModeItem.Header = LanguageManager.Get("ExitEditMode");
+        UndoItem.Header = LanguageManager.Get("Undo");
+        RedoItem.Header = LanguageManager.Get("Redo");
+        TimelineItem.Header = LanguageManager.Get("Timeline");
         ApplyBrushAppearance();
         UpdateNoteStatus();
     }
@@ -86,7 +141,7 @@ public partial class MainWindow
     {
         if (editingNotes && !loaded) ExitNotesMode();
         foreach (var item in new[] { OpenItem, ZoomInItem, ZoomOutItem, RotateLeftItem, RotateRightItem,
-                     NotesItem, SaveAsItem, GifItem, DetailsItem, UnloadItem, StopItem, SystemItem, AboutItem })
+                     NotesItem, CropItem, EditRotateItem, SaveAsItem, GifItem, DetailsItem, UnloadItem, StopItem, SystemItem, AboutItem })
             if (editingNotes) item.Visibility = Visibility.Collapsed;
         EditingDocumentItem.Visibility = SwitchToolItem.Visibility = ExitEditModeItem.Visibility =
             editingNotes ? Visibility.Visible : Visibility.Collapsed;
@@ -100,21 +155,33 @@ public partial class MainWindow
             foreach (var item in new[] { ZoomInItem, ZoomOutItem, RotateLeftItem, RotateRightItem, DetailsItem, UnloadItem })
                 item.Visibility = loaded ? Visibility.Visible : Visibility.Collapsed;
             NotesItem.Visibility = loaded ? Visibility.Visible : Visibility.Collapsed;
+            CropItem.Visibility = EditRotateItem.Visibility = loaded ? Visibility.Visible : Visibility.Collapsed;
             GifItem.Visibility = loaded && isGif ? Visibility.Visible : Visibility.Collapsed;
             SaveAsItem.Visibility = loaded && NotesDirty ? Visibility.Visible : Visibility.Collapsed;
             StopItem.Visibility = operation is not null || directoryScan is not null || gifWindow?.IsWorking == true ||
                 savingNotes ? Visibility.Visible : Visibility.Collapsed;
         }
-        EditingDocumentItem.Header = noteTool == NoteTool.Text
-            ? LanguageManager.Get("EditingWithTextTool")
-            : string.Format(LanguageManager.Get("EditingDocumentWithTool"),
-                LanguageManager.Get(noteTool == NoteTool.Brush ? "Brush" : "BrushEraser"));
+        EditingDocumentItem.Header = string.Format(LanguageManager.Get("EditingDocumentWithTool"),
+            LanguageManager.Get(noteTool switch
+            {
+                NoteTool.Brush => "Brush",
+                NoteTool.Eraser => "BrushEraser",
+                NoteTool.Text => "TextTool",
+                NoteTool.Crop => "CropTool",
+                _ => "RotateEditTool"
+            }));
         EditBrushItem.Background = noteTool == NoteTool.Brush ? Brushes.Gray : Brushes.Black;
         EditEraserItem.Background = noteTool == NoteTool.Eraser ? Brushes.Gray : Brushes.Black;
         EditTextItem.Background = noteTool == NoteTool.Text ? Brushes.Gray : Brushes.Black;
+        EditCropItem.Background = noteTool == NoteTool.Crop ? Brushes.Gray : Brushes.Black;
+        EditRotateToolItem.Background = noteTool == NoteTool.Rotate ? Brushes.Gray : Brushes.Black;
         EditBrushItem.Foreground = EditEraserItem.Foreground = Brushes.White;
+        EditCropItem.Foreground = EditRotateToolItem.Foreground = Brushes.White;
+        CropTools.Visibility = editingNotes && noteTool == NoteTool.Crop ? Visibility.Visible : Visibility.Collapsed;
+        RotateEditTools.Visibility = editingNotes && noteTool == NoteTool.Rotate ? Visibility.Visible : Visibility.Collapsed;
         ApplyTextToolAppearance();
         UpdateTextSelectionMenu();
+        UpdateHistoryMenu();
     }
 
     private void ResetNotesForNewImage()
@@ -128,8 +195,15 @@ public partial class MainWindow
         NotesCanvas.Children.Clear();
         activeEraserPreview = null;
         noteTiles.Clear();
+        cropRect = null;
+        CancelCropRecenter();
+        Surface.RenderTransform = Transform.Identity;
+        cropBoundaryTipDelay.Stop();
+        CropBoundaryTip.Visibility = Visibility.Collapsed;
+        UpdateCropOverlay();
         notesVersion++;
         savedNotesVersion = notesVersion;
+        ResetNoteHistory();
         noteStatusResult = false;
         UpdateNoteStatus();
     }
@@ -196,12 +270,15 @@ public partial class MainWindow
     private void EnterNotesMode(NoteTool tool)
     {
         if (source is null || savingNotes) return;
+        // The finished open message must release the footer before the tool's
+        // clean/dirty editing status becomes the primary left-side message.
+        ClearCompletedTaskProgress();
         if (drawingNote && noteTool == NoteTool.Eraser && tool != NoteTool.Eraser)
         {
             CancelActiveEraserPreview();
             Viewer.ReleaseMouseCapture();
         }
-        if (tool != NoteTool.Text)
+        if (tool is NoteTool.Brush or NoteTool.Eraser)
         {
             try
             {
@@ -211,10 +288,12 @@ public partial class MainWindow
             catch (StageException ex) { ShowNotesError(ex); return; }
         }
         noteTool = tool;
+        FinishCropDrag(false);
         if (tool != NoteTool.Eraser) HideActiveEraserPreview();
         editingNotes = true;
         noteStatusResult = false;
         NotesCanvas.IsHitTestVisible = true;
+        UpdateCropOverlay();
         UpdateTextEditorsInteractivity();
         if (tool == NoteTool.Text) OnTextModeEntered();
         ApplyBrushAppearance();
@@ -224,19 +303,28 @@ public partial class MainWindow
 
     private void ExitNotesMode()
     {
+        if (recordingStroke) FinishNoteStroke();
         if (noteTool == NoteTool.Eraser && drawingNote)
             Viewer.ReleaseMouseCapture();
         editingNotes = false;
+        CancelCropRecenter();
+        FinishCropDrag(false);
+        CropTools.Visibility = RotateEditTools.Visibility = Visibility.Collapsed;
+        cropBoundaryTipDelay.Stop();
+        CropBoundaryTip.Visibility = Visibility.Collapsed;
         drawingNote = false;
         lastNotePoint = null;
         HideActiveEraserPreview();
         CancelTextNoteEditing();
         NotesCanvas.IsHitTestVisible = false;
+        UpdateCropOverlay();
     }
 
     private void Brush_Click(object sender, RoutedEventArgs e) => EnterNotesMode(NoteTool.Brush);
     private void BrushEraser_Click(object sender, RoutedEventArgs e) => EnterNotesMode(NoteTool.Eraser);
     private void TextTool_Click(object sender, RoutedEventArgs e) => EnterNotesMode(NoteTool.Text);
+    private void Crop_Click(object sender, RoutedEventArgs e) => EnterNotesMode(NoteTool.Crop);
+    private void EditRotate_Click(object sender, RoutedEventArgs e) => EnterNotesMode(NoteTool.Rotate);
     private void TextSettings_Click(object sender, RoutedEventArgs e) => OpenSelectedTextOptions();
     private void TextFontSize_Click(object sender, RoutedEventArgs e) => OpenTextFontSizeOptions();
     private void Text_OptionsRightClick(object sender, MouseButtonEventArgs e)
@@ -313,13 +401,17 @@ public partial class MainWindow
     {
         noteStatusResult = true;
         EditStatusLabel.Visibility = Visibility.Visible;
-        EditStatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"),
+        EditStatusText.Text = string.Format(LanguageManager.Get("OperationFailed"),
             $"{ex.StageCode}: {ex.Message}");
     }
 
     private bool HandleNotesMouseDown(MouseButtonEventArgs e)
     {
         if (!editingNotes) return false;
+        if (noteTool == NoteTool.Crop && e.ChangedButton == MouseButton.Left &&
+            !Keyboard.IsKeyDown(Key.Space)) return BeginCropDrag(e);
+        if (noteTool == NoteTool.Rotate && e.ChangedButton == MouseButton.Left &&
+            !Keyboard.IsKeyDown(Key.Space)) return true;
         if (noteTool == NoteTool.Text && TryBeginTextFrameDrag(e)) return true;
         if (e.ChangedButton == MouseButton.Middle ||
             (e.ChangedButton == MouseButton.Left && Keyboard.IsKeyDown(Key.Space)))
@@ -340,6 +432,7 @@ public partial class MainWindow
             return true;
         }
         drawingNote = true;
+        BeginNoteStroke();
         var canvasPoint = e.GetPosition(NotesCanvas);
         lastNotePoint = ToOriginalPoint(canvasPoint);
         PaintNoteSegment(lastNotePoint.Value, lastNotePoint.Value);
@@ -352,6 +445,7 @@ public partial class MainWindow
 
     private bool HandleNotesMouseMove(MouseEventArgs e)
     {
+        if (drawingCrop) return UpdateCropDrag(e);
         if (UpdateTextFrameDrag(e)) return true;
         UpdateTextFrameHover(e.GetPosition(NotesCanvas));
         if (noteTool == NoteTool.Text && IsTextEditorEvent(e)) return false;
@@ -367,6 +461,7 @@ public partial class MainWindow
             drawingNote = false;
             lastNotePoint = null;
             HideActiveEraserPreview();
+            FinishNoteStroke();
             return true;
         }
         var canvasPoint = e.GetPosition(NotesCanvas);
@@ -380,6 +475,13 @@ public partial class MainWindow
 
     private void HandleNotesMouseUp(MouseButtonEventArgs e)
     {
+        if (drawingCrop && e.ChangedButton == MouseButton.Left)
+        {
+            FinishCropDrag(true);
+            e.Handled = true;
+            return;
+        }
+        if (noteTool is NoteTool.Crop or NoteTool.Rotate) return;
         if (FinishTextFrameDrag(e)) return;
         if (noteTool == NoteTool.Text && IsTextEditorEvent(e)) return;
         if (!editingNotes || e.ChangedButton != MouseButton.Left || dragPoint is not null) return;
@@ -394,6 +496,7 @@ public partial class MainWindow
         drawingNote = false;
         lastNotePoint = null;
         HideActiveEraserPreview();
+        FinishNoteStroke();
         Viewer.ReleaseMouseCapture();
         RefreshMenu();
         UpdateNoteStatus();
@@ -456,6 +559,17 @@ public partial class MainWindow
         drawingNote = false;
         lastNotePoint = null;
         HideActiveEraserPreview();
+        FinishNoteStroke();
+        UpdateNoteStatus();
+    }
+
+    private void FinishInterruptedBrushStroke()
+    {
+        if (noteTool != NoteTool.Brush || !drawingNote) return;
+        drawingNote = false;
+        lastNotePoint = null;
+        FinishNoteStroke();
+        RefreshMenu();
         UpdateNoteStatus();
     }
 
@@ -536,6 +650,7 @@ public partial class MainWindow
                 if (oldAlpha == newAlpha && (newAlpha == 0 ||
                     (tile.Pixels[pixel] == brushColor.B && tile.Pixels[pixel + 1] == brushColor.G &&
                      tile.Pixels[pixel + 2] == brushColor.R))) continue;
+                CaptureTileBefore(key, tile.Occupied == 0 && oldAlpha == 0 ? null : tile);
                 if (oldAlpha == 0 && newAlpha != 0) tile.Occupied++;
                 if (oldAlpha != 0 && newAlpha == 0) tile.Occupied--;
                 tile.Pixels[pixel] = newAlpha == 0 ? (byte)0 : brushColor.B;
@@ -617,9 +732,27 @@ public partial class MainWindow
             (byte[])entry.Value.Pixels.Clone())).ToArray();
     }
 
-    private async void SaveAs_Click(object sender, RoutedEventArgs e)
+    private async void SaveAs_Click(object sender, RoutedEventArgs e) => await SaveNotesAsAsync();
+
+    /// <summary>
+    /// Distinguishes a failed export from an intentionally canceled dialog so
+    /// navigation and closing only offer retry/discard after a real failure.
+    /// </summary>
+    private async Task<SaveNotesResult> SaveNotesAsAsync()
     {
-        if (path is null || !NotesDirty || savingNotes) return;
+        try { return await SaveNotesAsCoreAsync(); }
+        catch (Exception ex)
+        {
+            ShowNotesError(ex is StageException stage ? stage :
+                new StageException("NOTES0004", ex.Message, ex)); // NOTES0004
+            return SaveNotesResult.Failed;
+        }
+    }
+
+    private async Task<SaveNotesResult> SaveNotesAsCoreAsync()
+    {
+        if (!NotesDirty) return SaveNotesResult.Saved;
+        if (path is null || savingNotes) return SaveNotesResult.Canceled;
         var inputPath = path;
         var extension = System.IO.Path.GetExtension(inputPath).TrimStart('.');
         var originalSupported = !string.IsNullOrWhiteSpace(extension) && AnnotationExport.CanSaveAsOriginal(inputPath);
@@ -635,21 +768,22 @@ public partial class MainWindow
             AddExtension = true,
             OverwritePrompt = true
         };
-        if (dialog.ShowDialog(this) != true) return;
+        if (dialog.ShowDialog(this) != true) return SaveNotesResult.Canceled;
         if (string.Equals(System.IO.Path.GetFullPath(dialog.FileName), System.IO.Path.GetFullPath(inputPath),
             StringComparison.OrdinalIgnoreCase))
         {
             EditStatusLabel.Visibility = Visibility.Visible;
             var overwrite = new StageException("NOTES0003", LanguageManager.Get("SaveAsCannotOverwriteOriginal"));
             noteStatusResult = true;
-            EditStatusLabel.Content = string.Format(LanguageManager.Get("SaveFailed"),
+            EditStatusText.Text = string.Format(LanguageManager.Get("SaveFailed"),
                 $"{overwrite.StageCode}: {overwrite.Message}");
-            return;
+            return SaveNotesResult.Failed;
         }
         var snapshot = SnapshotNotes();
         ClearCompletedTaskProgress();
         var version = notesVersion;
         var angle = rotation;
+        var crop = SnapshotCrop();
         var save = new CancellationTokenSource();
         notesSaveOperation = save;
         savingNotes = true;
@@ -658,6 +792,7 @@ public partial class MainWindow
         SetTaskProgress("save", LanguageManager.Get("SaveAsAction"), 0);
         RefreshMenu();
         var completed = false;
+        var failed = false;
         var textSourceProgressVisible = false;
         var finalSaveMessage = LanguageManager.Get("Stopped");
         try
@@ -680,7 +815,7 @@ public partial class MainWindow
             if (textSourceProgressVisible)
                 SetTaskProgress("text", LanguageManager.Get("TextRenderingAction"), 0);
             await AnnotationExport.SaveAsync(inputPath, dialog.FileName, angle,
-                snapshot, textSource, save.Token, progress);
+                snapshot, textSource, crop, save.Token, progress);
             if (ReferenceEquals(notesSaveOperation, save))
             {
                 if (version == notesVersion && path == inputPath && angle == rotation)
@@ -699,6 +834,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
+            failed = true;
             var code = ex is StageException stage ? stage.StageCode : "NOTES0004";
             if (ReferenceEquals(notesSaveOperation, save))
             {
@@ -735,6 +871,8 @@ public partial class MainWindow
             }
             save.Dispose();
         }
+        if (completed && !NotesDirty && path == inputPath) return SaveNotesResult.Saved;
+        return failed || completed ? SaveNotesResult.Failed : SaveNotesResult.Canceled;
     }
 
     private void UpdateNoteStatus()
@@ -745,27 +883,38 @@ public partial class MainWindow
             RefreshTaskProgress();
             return;
         }
+        if (footerNoticeKey is not null)
+        {
+            StatusLabel.Visibility = Visibility.Collapsed;
+            EditStatusLabel.Visibility = Visibility.Visible;
+            EditStatusText.Text = LanguageManager.Get(footerNoticeKey);
+            return;
+        }
         EditStatusLabel.Visibility = editingNotes || savingNotes || noteStatusResult
             ? Visibility.Visible : Visibility.Collapsed;
+        StatusLabel.Visibility = EditStatusLabel.Visibility == Visibility.Visible
+            ? Visibility.Collapsed : Visibility.Visible;
         if (savingNotes || noteStatusResult || !editingNotes) return;
         if (drawingNote)
         {
-            EditStatusLabel.Content = LanguageManager.Get(noteTool switch
+            EditStatusText.Text = LanguageManager.Get(noteTool switch
             {
                 NoteTool.Brush => "BrushInUse",
                 NoteTool.Eraser => "EraserInUse",
-                _ => "TextInUse"
+                NoteTool.Text => "TextInUse",
+                NoteTool.Crop => "CropTool",
+                _ => "RotateEditTool"
             });
             return;
         }
         if (noteTool == NoteTool.Brush)
         {
-            EditStatusLabel.Content = string.Format(LanguageManager.Get("BrushPixelStatus"),
+            EditStatusText.Text = string.Format(LanguageManager.Get("BrushPixelStatus"),
                 brushDiameter.ToString("0.##"),
                 (brushDiameter / (scale * monitorDpiScale)).ToString("0.##"));
             return;
         }
-        EditStatusLabel.Content = noteTool == NoteTool.Text
+        EditStatusText.Text = noteTool == NoteTool.Text
             ? LanguageManager.Get("TextEditingStatus")
             : LanguageManager.Get(NotesDirty ? "EditedUnsaved" : "EditingUnmodified");
     }

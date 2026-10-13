@@ -8,6 +8,7 @@ using System.Windows.Threading;
 using System.Windows.Interop;
 using System.Windows.Controls.Primitives;
 using System.IO;
+using System.ComponentModel;
 using TANGERINE_PhotoViewer.DefaultApps;
 
 namespace TANGERINE_PhotoViewer;
@@ -47,10 +48,42 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer navigatorLimitDelay = new() { Interval = TimeSpan.FromSeconds(2) };
 
     private int? displayedZoomPercent;
+    private bool closePromptActive;
+    private bool closeAfterUnsavedDecision;
+    private readonly OverflowTextMarquee editStatusMarquee;
+    private readonly OverflowTextMarquee baseStatusMarquee;
+    private readonly OverflowTextMarquee cropTipMarquee;
+    private readonly DispatcherTimer footerNoticeDelay = new()
+        { Interval = TimeSpan.FromSeconds(2) };
+    private string? footerNoticeKey;
 
     public MainWindow()
     {
         InitializeComponent();
+        InitializeCropTool();
+        editStatusMarquee = new OverflowTextMarquee(EditStatusText, EditStatusLabel,
+            () => EditStatusLabel.ActualWidth - EditStatusLabel.Padding.Left -
+                EditStatusLabel.Padding.Right);
+        baseStatusMarquee = new OverflowTextMarquee(StatusText, StatusLabel,
+            () => StatusLabel.ActualWidth - StatusLabel.Padding.Left -
+                StatusLabel.Padding.Right);
+        cropTipMarquee = new OverflowTextMarquee(CropBoundaryTipText, CropBoundaryTip,
+            () => CropBoundaryTip.ActualWidth - CropBoundaryTip.Padding.Left -
+                CropBoundaryTip.Padding.Right - CropBoundaryTip.BorderThickness.Left -
+                CropBoundaryTip.BorderThickness.Right);
+        FooterGrid.LayoutUpdated += (_, _) => UpdateLeftStatusWidth();
+        // One line of text plus proportional label padding defines a stable
+        // footer height even when a longer message replaces a short one.
+        FooterGrid.Height = Math.Ceiling(Math.Max(EditStatusText.FontSize,
+            StatusText.FontSize) * 1.6 + Math.Max(
+            EditStatusLabel.Padding.Top + EditStatusLabel.Padding.Bottom,
+            StatusLabel.Padding.Top + StatusLabel.Padding.Bottom));
+        footerNoticeDelay.Tick += (_, _) =>
+        {
+            footerNoticeDelay.Stop();
+            footerNoticeKey = null;
+            UpdateNoteStatus();
+        };
         renderDelay.Tick += async (_, _) => { renderDelay.Stop(); await RenderAsync(); };
         navigatorLimitDelay.Tick += (_, _) => { navigatorLimitDelay.Stop(); NavigatorLimitLabel.Visibility = Visibility.Collapsed; };
         ApplyText();
@@ -63,9 +96,52 @@ public partial class MainWindow : Window
             _ = OpenAsync(file);
     }
 
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!closeAfterUnsavedDecision && NotesDirty)
+        {
+            e.Cancel = true;
+            if (!closePromptActive)
+            {
+                closePromptActive = true;
+                // Defer the dialog until the canceled Closing event has returned;
+                // an immediate discard choice must not reenter Window.Close here.
+                Dispatcher.BeginInvoke(() => _ = ConfirmCloseAsync(),
+                    DispatcherPriority.Background);
+            }
+        }
+        base.OnClosing(e);
+    }
+
+    private async Task ConfirmCloseAsync()
+    {
+        try
+        {
+            if (!await ConfirmUnsavedChangesAsync("CloseWindow")) return;
+            closeAfterUnsavedDecision = true;
+            Close();
+        }
+        catch (Exception ex)
+        {
+            ShowNotesError(new StageException("NOTES0006",
+                LanguageManager.Get("UnsavedChangesPromptFailed"), ex)); // NOTES0006
+        }
+        finally
+        {
+            closePromptActive = false;
+            closeAfterUnsavedDecision = false;
+        }
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         renderDelay.Stop();
+        cropBoundaryTipDelay.Stop();
+        CancelCropRecenter();
+        editStatusMarquee.Dispose();
+        baseStatusMarquee.Dispose();
+        cropTipMarquee.Dispose();
+        footerNoticeDelay.Stop();
         CancelNotesSave();
         operation?.Cancel();
         CancelDirectoryScan();
@@ -110,7 +186,7 @@ public partial class MainWindow : Window
         NextImageButton.Content = LanguageManager.Get("NextImageSymbol");
         PreviousImageButton.ToolTip = LanguageManager.Get("PreviousImage");
         NextImageButton.ToolTip = LanguageManager.Get("NextImage");
-        StatusLabel.Content = LanguageManager.Get("Ready");
+        StatusText.Text = LanguageManager.Get("Ready");
         RefreshMenu();
     }
 
@@ -160,8 +236,11 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true) await OpenAsync(dialog.FileName);
     }
 
-    private async Task OpenAsync(string file)
+    private async Task OpenAsync(string file, string actionKey = "Open")
     {
+        if (!await ConfirmUnsavedChangesAsync(actionKey)) return;
+        var confirmedNotesVersion = notesVersion;
+        var openingStarted = TimelineNow();
         ClearCompletedTaskProgress();
         CancelNotesSave();
         renderDelay.Stop();
@@ -189,6 +268,12 @@ public partial class MainWindow : Window
                 file, LargeFileBytes, previewWidth, previewHeight, token, progress), token);
             token.ThrowIfCancellationRequested();
             if (workGeneration != generation) return;
+            // Loading runs in the background. An edit made after the first
+            // confirmation must be confirmed before replacing the image.
+            if (NotesDirty && notesVersion != confirmedNotesVersion &&
+                !await ConfirmUnsavedChangesAsync(actionKey)) return;
+            token.ThrowIfCancellationRequested();
+            if (workGeneration != generation) return;
             path = file;
             source = result.Image;
             isGif = result.IsGif;
@@ -211,7 +296,8 @@ public partial class MainWindow : Window
             renderSuspended = false;
             UpdateZoomLabel();
             ResetNotesForNewImage();
-            StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
+            RecordOpenedTimeline(openingStarted, file);
+            StatusText.Text = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
             completed = true;
             CloseImageWindows();
             _ = ScanDirectoryAsync(file);
@@ -223,7 +309,7 @@ public partial class MainWindow : Window
             if (workGeneration == generation)
             {
                 Restore(previous);
-                StatusLabel.Content = LanguageManager.Get("Stopped");
+                StatusText.Text = LanguageManager.Get("Stopped");
             }
         }
         catch (Exception ex)
@@ -232,7 +318,7 @@ public partial class MainWindow : Window
             {
                 Restore(previous);
                 var detail = ex is StageException stage ? $"{stage.StageCode}: {stage.Message}" : ex.Message;
-                StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), detail);
+                StatusText.Text = string.Format(LanguageManager.Get("OperationFailed"), detail);
             }
         }
         finally
@@ -267,6 +353,8 @@ public partial class MainWindow : Window
 
     private async void Unload_Click(object sender, RoutedEventArgs e)
     {
+        if (!await ConfirmUnsavedChangesAsync("Unload")) return;
+        var confirmedNotesVersion = notesVersion;
         ClearCompletedTaskProgress();
         CancelNotesSave();
         var token = BeginWork();
@@ -278,6 +366,10 @@ public partial class MainWindow : Window
             await Task.Run(() => { token.ThrowIfCancellationRequested(); }, token);
             token.ThrowIfCancellationRequested();
             if (workGeneration != generation) return;
+            if (NotesDirty && notesVersion != confirmedNotesVersion &&
+                !await ConfirmUnsavedChangesAsync("Unload")) return;
+            token.ThrowIfCancellationRequested();
+            if (workGeneration != generation) return;
             renderDelay.Stop();
             path = null; source = null; isGif = false; large = false; rotation = 0; scale = 1;
             ResetNotesForNewImage();
@@ -287,12 +379,12 @@ public partial class MainWindow : Window
             Photo.Source = null; Preview.Source = null; Surface.Width = 0; Surface.Height = 0;
             NavigatorImage.Source = null;
             CloseImageWindows();
-            StatusLabel.Content = LanguageManager.Get("Ready");
+            StatusText.Text = LanguageManager.Get("Ready");
             completed = true;
             UpdateZoomLabel();
             RefreshMenu();
         }
-        catch (OperationCanceledException) { if (workGeneration == generation) StatusLabel.Content = LanguageManager.Get("Stopped"); }
+        catch (OperationCanceledException) { if (workGeneration == generation) StatusText.Text = LanguageManager.Get("Stopped"); }
         finally
         {
             if (workGeneration == generation)
@@ -313,7 +405,7 @@ public partial class MainWindow : Window
         gifWindow?.StopWork();
 
         renderDelay.Stop();
-        StatusLabel.Content = LanguageManager.Get("Stopped");
+        StatusText.Text = LanguageManager.Get("Stopped");
         RefreshMenu();
     }
 
@@ -367,6 +459,8 @@ public partial class MainWindow : Window
     private void SetScale(double nextScale, Point? anchor = null)
     {
         if (source is null) return;
+        CancelCropRecenter();
+        Surface.RenderTransform = Transform.Identity;
         nextScale = Math.Clamp(nextScale, MinimumScale(), Math.Max(64, MinimumScale()));
         var oldScale = scale;
         if (Math.Abs(nextScale - oldScale) < 0.0000001) return;
@@ -412,6 +506,7 @@ public partial class MainWindow : Window
     private void Viewer_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         UpdateNavigationButtons();
+        UpdateCropOverlay();
         if (source is null) return;
         if (!navigatorSizeChosen) SetDefaultNavigatorSize();
         else
@@ -431,12 +526,24 @@ public partial class MainWindow : Window
         if (large) QueueRender();
     }
 
-    private void Rotate(int degrees)
+    private void Rotate(int degrees, bool preserveNoteVersions = false)
     {
         if (source is null) return;
+        CancelCropRecenter();
+        Surface.RenderTransform = Transform.Identity;
+        var version = notesVersion;
+        var savedVersion = savedNotesVersion;
+        var oldWidth = rotation is 90 or 270 ? imageHeight : imageWidth;
+        var oldHeight = rotation is 90 or 270 ? imageWidth : imageHeight;
         Photo.Source = large ? null : source;
         rotation = (rotation + degrees + 360) % 360;
+        RotateCrop(degrees, oldWidth, oldHeight);
         RotateNotes(degrees);
+        if (preserveNoteVersions)
+        {
+            notesVersion = version;
+            savedNotesVersion = savedVersion;
+        }
         scale = Math.Max(scale, MinimumScale());
         UpdateGeometry();
         UpdateNavigatorImage();
@@ -470,6 +577,7 @@ public partial class MainWindow : Window
             Photo.LayoutTransform = new RotateTransform(rotation);
         }
         UpdateNotesGeometry();
+        UpdateCropOverlay();
     }
 
     private void Viewer_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -511,7 +619,12 @@ public partial class MainWindow : Window
         RestoreNotesHitTestingAfterPan();
     }
     private void Viewer_MouseLeave(object sender, MouseEventArgs e) => ClearTextFrameHover();
-    private void Viewer_LostMouseCapture(object sender, MouseEventArgs e) => CancelActiveEraserPreview();
+    private void Viewer_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        FinishCropDrag(false);
+        CancelActiveEraserPreview();
+        FinishInterruptedBrushStroke();
+    }
     private void Viewer_ScrollChanged(object sender, System.Windows.Controls.ScrollChangedEventArgs e)
     {
         UpdateNavigatorViewport();
@@ -711,8 +824,37 @@ public partial class MainWindow : Window
 
     private void PreviewArea_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        CropBoundaryTip.MaxWidth = e.NewSize.Width * 0.6;
         UpdateNavigationButtons();
         UpdateNoteMonitorScale();
+    }
+
+    private void FooterGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+        => UpdateLeftStatusWidth();
+
+    private void UpdateLeftStatusWidth()
+    {
+        // Keep the edit message inside the actual proportional Grid column.
+        // A horizontal StackPanel may report the width of its children instead
+        // of the narrower width that its parent Grid ultimately grants it.
+        // The marquee handles any text that cannot fit the remaining width.
+        var width = Math.Max(1, FooterGrid.ColumnDefinitions[0].ActualWidth -
+            (ZoomLabel.IsVisible ? ZoomLabel.ActualWidth : 0) -
+            (NavigatorLimitLabel.IsVisible ? NavigatorLimitLabel.ActualWidth : 0));
+        if (Math.Abs(EditStatusLabel.MaxWidth - width) < 0.5 &&
+            Math.Abs(StatusLabel.MaxWidth - width) < 0.5) return;
+        EditStatusLabel.MaxWidth = width;
+        StatusLabel.MaxWidth = width;
+        editStatusMarquee?.Restart();
+        baseStatusMarquee?.Restart();
+    }
+
+    private void ShowFooterNotice(string key)
+    {
+        footerNoticeDelay.Stop();
+        footerNoticeKey = key;
+        UpdateNoteStatus();
+        footerNoticeDelay.Start();
     }
 
     private void UpdateNavigationButtons()
@@ -787,7 +929,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             if (scanGeneration == directoryScanGeneration)
-                StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), ex.Message);
+                StatusText.Text = string.Format(LanguageManager.Get("OperationFailed"), ex.Message);
         }
         finally
         {
@@ -804,7 +946,8 @@ public partial class MainWindow : Window
             string.Equals(candidate, path, StringComparison.OrdinalIgnoreCase));
         if (index < 0 || neighboringImages.Length < 2) return;
         var nextIndex = (index + direction + neighboringImages.Length) % neighboringImages.Length;
-        await OpenAsync(neighboringImages[nextIndex]);
+        await OpenAsync(neighboringImages[nextIndex],
+            direction < 0 ? "PreviousImage" : "NextImage");
     }
 
     private async void PreviousImage_Click(object sender, RoutedEventArgs e) => await NavigateImageAsync(-1);
@@ -931,7 +1074,7 @@ public partial class MainWindow : Window
             if (stopRequested) return;
             if (tile is null)
             {
-                StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"),
+                StatusText.Text = string.Format(LanguageManager.Get("OperationFailed"),
                     $"IMGL0003: {LanguageManager.Get("LargePreviewOnly")}");
             }
             else
@@ -945,18 +1088,18 @@ public partial class MainWindow : Window
                     if (hoveredTextNote is not null) QueueInverseFrameRefresh();
                 }
                 finally { renderSuspended = false; }
-                StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
+                StatusText.Text = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
                 completed = true;
             }
         }
-        catch (OperationCanceledException) { if (workGeneration == generation) StatusLabel.Content = LanguageManager.Get("Stopped"); }
+        catch (OperationCanceledException) { if (workGeneration == generation) StatusText.Text = LanguageManager.Get("Stopped"); }
         catch (Exception error)
         {
             if (workGeneration == generation && !token.IsCancellationRequested)
             {
                 var detail = error is StageException stage ? $"{stage.StageCode}: {stage.Message}" :
                     $"IMGL0003: {error.Message}";
-                StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), detail);
+                StatusText.Text = string.Format(LanguageManager.Get("OperationFailed"), detail);
             }
         }
         finally
@@ -1001,11 +1144,11 @@ public partial class MainWindow : Window
             source = preview;
             UpdateGeometry();
             UpdateNavigatorImage();
-            StatusLabel.Content = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
+            StatusText.Text = string.Format(LanguageManager.Get("Opened"), System.IO.Path.GetFileName(file));
             completed = true;
         }
-        catch (OperationCanceledException) { if (workGeneration == generation) StatusLabel.Content = LanguageManager.Get("Stopped"); }
-        catch (Exception ex) { if (workGeneration == generation) StatusLabel.Content = string.Format(LanguageManager.Get("OperationFailed"), ex.Message); }
+        catch (OperationCanceledException) { if (workGeneration == generation) StatusText.Text = LanguageManager.Get("Stopped"); }
+        catch (Exception ex) { if (workGeneration == generation) StatusText.Text = string.Format(LanguageManager.Get("OperationFailed"), ex.Message); }
         finally
         {
             if (workGeneration == generation)

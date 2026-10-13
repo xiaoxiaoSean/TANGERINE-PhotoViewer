@@ -8,10 +8,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\TANGERINE-PV.ico</ApplicationIcon>
     <NeutralLanguage>en-US</NeutralLanguage>
     <SatelliteResourceLanguages>en-US;zh-CN;zh-TW;zh-HK;zh-MO</SatelliteResourceLanguages>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Keep WPF's per-monitor layout and rendering active when a window crosses displays. -->
+    <RuntimeHostConfigurationOption Include="Switch.System.Windows.DoNotScaleForDpiChanges" Value="false" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Magick.NET-Q8-AnyCPU" Version="14.17.2" />

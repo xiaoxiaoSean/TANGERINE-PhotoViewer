@@ -15,6 +15,7 @@ namespace TANGERINE_PhotoViewer;
 /// after another; zero alpha leaves the source photograph unchanged.
 /// </summary>
 internal sealed record AnnotationTile(int X, int Y, int Width, int Height, byte[] BgraPixels);
+internal sealed record AnnotationCrop(int X, int Y, int Width, int Height);
 
 /// <summary>
 /// Writes raster ink at the source image's actual dimensions. The viewer's thumbnail and
@@ -60,16 +61,21 @@ internal static class AnnotationExport
     internal static Task SaveAsync(string sourcePath, string destinationPath, int rotation,
         IReadOnlyList<AnnotationTile> tiles, TextAnnotationSource? textSource,
         CancellationToken token, IProgress<int> progress)
+        => SaveAsync(sourcePath, destinationPath, rotation, tiles, textSource, null, token, progress);
+
+    internal static Task SaveAsync(string sourcePath, string destinationPath, int rotation,
+        IReadOnlyList<AnnotationTile> tiles, TextAnnotationSource? textSource, AnnotationCrop? crop,
+        CancellationToken token, IProgress<int> progress)
     {
         if (tiles is null || progress is null)
             throw new StageException("ANNS0001", LanguageManager.Get("AnnotationExportInvalid")); // ANNS0001
         var snapshot = tiles.ToArray();
         return Task.Run(() => Save(sourcePath, destinationPath, rotation, snapshot,
-            textSource, token, progress), token);
+            textSource, crop, token, progress), token);
     }
 
     private static void Save(string sourcePath, string destinationPath, int rotation,
-        AnnotationTile[] tiles, TextAnnotationSource? textSource,
+        AnnotationTile[] tiles, TextAnnotationSource? textSource, AnnotationCrop? crop,
         CancellationToken token, IProgress<int> progress)
     {
         string? temporaryPath = null;
@@ -80,7 +86,8 @@ internal static class AnnotationExport
             var destination = Path.GetFullPath(destinationPath);
             if (!File.Exists(source) || string.Equals(source, destination, StringComparison.OrdinalIgnoreCase) ||
                 rotation is not (0 or 90 or 180 or 270) || tiles.Any(tile => tile.X < 0 || tile.Y < 0 ||
-                tile.Width <= 0 || tile.Height <= 0 || (long)tile.Width * tile.Height * 4 != tile.BgraPixels.Length))
+                tile.Width <= 0 || tile.Height <= 0 || (long)tile.Width * tile.Height * 4 != tile.BgraPixels.Length) ||
+                crop is { X: < 0 } or { Y: < 0 } or { Width: <= 0 } or { Height: <= 0 })
                 throw new StageException("ANNS0001", LanguageManager.Get("AnnotationExportInvalid")); // ANNS0001
 
             var extension = Path.GetExtension(destination).ToLowerInvariant();
@@ -125,18 +132,29 @@ internal static class AnnotationExport
                         psdInfo.Height, 4, format: NetVips.Enums.BandFormat.Uchar,
                         interpretation: NetVips.Enums.Interpretation.Srgb,
                         memory: false, access: NetVips.Enums.Access.Sequential);
-                    SaveWithVips(source, temporaryPath, rotation, tiles, textSource,
+                    SaveWithVips(source, temporaryPath, rotation, tiles, textSource, crop,
                         token, progress, suppliedSource: raw);
                 }
                 finally { TryDelete(rawPath); }
             }
             else if (multipage)
             {
-                if (IsTiffContent(source))
+                if (crop is not null)
+                {
+                    // A stack's pages need separate crop rectangles. The Magick
+                    // fallback preserves frame timing and applies the same crop
+                    // to every oriented page without mixing page boundaries.
+                    var fallbackTiles = textSource is { HasVisibleText: true }
+                        ? CombineSmallTextTiles(tiles, textSource,
+                            ReadDimensions(source), token, progress) : tiles;
+                    SaveMultipage(source, temporaryPath, rotation, fallbackTiles,
+                        crop, token, progress);
+                }
+                else if (IsTiffContent(source))
                 {
                     try
                     {
-                        SaveWithVips(source, temporaryPath, rotation, tiles, textSource,
+                        SaveWithVips(source, temporaryPath, rotation, tiles, textSource, null,
                             token, progress, multipageTiff: true);
                     }
                     catch (Exception error) when (error is VipsException ||
@@ -146,7 +164,7 @@ internal static class AnnotationExport
                         var fallbackTiles = textSource is { HasVisibleText: true }
                             ? CombineSmallTextTiles(tiles, textSource,
                                 ReadDimensions(source), token, progress) : tiles;
-                        SaveMultipage(source, temporaryPath, rotation, fallbackTiles,
+                        SaveMultipage(source, temporaryPath, rotation, fallbackTiles, null,
                             token, progress);
                     }
                 }
@@ -155,14 +173,14 @@ internal static class AnnotationExport
                     var multipageTiles = textSource is null ? tiles :
                         CombineSmallTextTiles(tiles, textSource,
                             ReadDimensions(source), token, progress);
-                    SaveMultipage(source, temporaryPath, rotation, multipageTiles, token, progress);
+                    SaveMultipage(source, temporaryPath, rotation, multipageTiles, null, token, progress);
                 }
             }
             else
             {
                 try
                 {
-                    SaveWithVips(source, temporaryPath, rotation, tiles, textSource, token, progress);
+                    SaveWithVips(source, temporaryPath, rotation, tiles, textSource, crop, token, progress);
                 }
                 catch (Exception error) when (error is VipsException ||
                     error is StageException { StageCode: "ANNS0002" })
@@ -175,12 +193,12 @@ internal static class AnnotationExport
                         ? CombineSmallTextTiles(tiles, textSource,
                             ReadDimensions(source), token, progress)
                         : tiles;
-                    SaveWithMagick(source, temporaryPath, rotation, fallbackTiles, token, progress);
+                    SaveWithMagick(source, temporaryPath, rotation, fallbackTiles, crop, token, progress);
                 }
             }
 
             token.ThrowIfCancellationRequested();
-            VerifyDimensions(source, temporaryPath, rotation, photoshop, multipage);
+            VerifyDimensions(source, temporaryPath, rotation, photoshop, multipage, crop);
             token.ThrowIfCancellationRequested();
             File.Move(temporaryPath, destination, true);
             temporaryPath = null;
@@ -302,7 +320,7 @@ internal static class AnnotationExport
     }
 
     private static void SaveWithVips(string sourcePath, string outputPath, int rotation,
-        AnnotationTile[] tiles, TextAnnotationSource? textSource,
+        AnnotationTile[] tiles, TextAnnotationSource? textSource, AnnotationCrop? crop,
         CancellationToken token, IProgress<int> progress, bool multipageTiff = false,
         VipsImage? suppliedSource = null)
     {
@@ -428,6 +446,12 @@ internal static class AnnotationExport
                     270 => restoredSpace.Rot270(),
                     _ => restoredSpace.Copy()
                 };
+            // Crop after orientation because the editor stores the rectangle in
+            // the displayed coordinate system. This remains a lazy Vips region.
+            ValidateCrop(crop, oriented.Width, oriented.Height);
+            using var finalImage = crop is { } region
+                ? oriented.Crop(region.X, region.Y, region.Width, region.Height)
+                : oriented.Copy();
             oriented.SetProgress(new Progress<int>(percent => progress.Report(40 + Math.Clamp(percent, 0, 100) * 55 / 100)), token);
             progress.Report(40);
             var extension = Path.GetExtension(outputPath).ToLowerInvariant();
@@ -456,14 +480,14 @@ internal static class AnnotationExport
                 // 10 GiB source can easily exceed that after editing, even if
                 // the input happened to be compressed more efficiently.
                 if (new FileInfo(sourcePath).Length >= 2L * 1024 * 1024 * 1024 ||
-                    (long)oriented.Width * oriented.Height * Math.Max(1, oriented.Bands) >= 3L * 1024 * 1024 * 1024)
+                    (long)finalImage.Width * finalImage.Height * Math.Max(1, finalImage.Bands) >= 3L * 1024 * 1024 * 1024)
                     options["bigtiff"] = true;
             }
             if (extension is not (".jpg" or ".jpeg" or ".jpe" or ".png" or ".tif" or ".tiff" or
                 ".webp" or ".heic" or ".heif" or ".avif" or ".jxl" or ".jp2" or ".j2k" or ".gif" or
                 ".bmp" or ".ppm" or ".pgm" or ".pbm" or ".fits" or ".vips"))
                 throw new VipsException("No streaming saver is configured for this extension.");
-            oriented.WriteToFile(outputPath, options);
+            finalImage.WriteToFile(outputPath, options);
             token.ThrowIfCancellationRequested();
             progress.Report(95);
         }
@@ -745,7 +769,7 @@ internal static class AnnotationExport
     }
 
     private static void SaveMultipage(string sourcePath, string outputPath, int rotation,
-        AnnotationTile[] tiles, CancellationToken token, IProgress<int> progress)
+        AnnotationTile[] tiles, AnnotationCrop? crop, CancellationToken token, IProgress<int> progress)
     {
         LimitMagickExportCache();
         using var input = new FileStream(sourcePath, FileMode.Open, FileAccess.Read,
@@ -767,6 +791,13 @@ internal static class AnnotationExport
             token.ThrowIfCancellationRequested();
             if (i == 0) CompositeTiles(frames[i], tiles, token, progress);
             if (rotation != 0) frames[i].Rotate(rotation);
+            if (crop is { } selected)
+            {
+                ValidateCrop(selected, (int)frames[i].Width, (int)frames[i].Height);
+                frames[i].Crop(new MagickGeometry(selected.X, selected.Y,
+                    (uint)selected.Width, (uint)selected.Height));
+                frames[i].ResetPage();
+            }
             progress.Report(15 + (i + 1) * 30 / frames.Count);
         }
         token.ThrowIfCancellationRequested();
@@ -775,16 +806,32 @@ internal static class AnnotationExport
     }
 
     private static void SaveWithMagick(string sourcePath, string outputPath, int rotation,
-        AnnotationTile[] tiles, CancellationToken token, IProgress<int> progress)
+        AnnotationTile[] tiles, AnnotationCrop? crop, CancellationToken token, IProgress<int> progress)
     {
         LimitMagickExportCache();
         using var image = OpenMagickSource(sourcePath);
         token.ThrowIfCancellationRequested();
         CompositeTiles(image, tiles, token, progress);
         if (rotation != 0) image.Rotate(rotation);
+        if (crop is { } selected)
+        {
+            ValidateCrop(selected, (int)image.Width, (int)image.Height);
+            image.Crop(new MagickGeometry(selected.X, selected.Y,
+                (uint)selected.Width, (uint)selected.Height));
+            image.ResetPage();
+        }
         token.ThrowIfCancellationRequested();
         image.Write(outputPath);
         progress.Report(95);
+    }
+
+    private static void ValidateCrop(AnnotationCrop? crop, int width, int height)
+    {
+        if (crop is not { } selected) return;
+        if (selected.X < 0 || selected.Y < 0 || selected.Width <= 0 || selected.Height <= 0 ||
+            (long)selected.X + selected.Width > width ||
+            (long)selected.Y + selected.Height > height)
+            throw new StageException("ANNS0001", LanguageManager.Get("AnnotationExportInvalid")); // ANNS0001
     }
 
     private static MagickImage OpenMagickSource(string sourcePath)
@@ -836,15 +883,15 @@ internal static class AnnotationExport
     }
 
     private static void VerifyDimensions(string sourcePath, string outputPath, int rotation,
-        PsdCompositeReader.Info? photoshop, bool multipage)
+        PsdCompositeReader.Info? photoshop, bool multipage, AnnotationCrop? crop)
     {
         try
         {
             var (outputWidth, outputHeight) = ReadDimensions(outputPath);
             var (sourceWidth, sourceHeight) = photoshop is { } info
                 ? (info.Width, info.Height) : ReadDimensions(sourcePath);
-            var expectedWidth = rotation is 90 or 270 ? sourceHeight : sourceWidth;
-            var expectedHeight = rotation is 90 or 270 ? sourceWidth : sourceHeight;
+            var expectedWidth = crop?.Width ?? (rotation is 90 or 270 ? sourceHeight : sourceWidth);
+            var expectedHeight = crop?.Height ?? (rotation is 90 or 270 ? sourceWidth : sourceHeight);
             if (outputWidth != expectedWidth || outputHeight != expectedHeight)
                 throw new StageException("ANNS0004", LanguageManager.Get("AnnotationExportVerificationFailed")); // ANNS0004
             if (multipage)

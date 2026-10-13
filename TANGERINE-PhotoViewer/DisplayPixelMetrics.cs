@@ -39,16 +39,30 @@ internal static class DisplayPixelMetrics
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetMonitorInfoW(IntPtr monitor, ref MonitorInfo info);
 
+    /// <summary>
+    /// Reads the physical pixel resolution of the monitor containing the largest
+    /// part of an HWND. The false result lets visual styling retain its baseline
+    /// radius when a window is closing or its monitor information is unavailable.
+    /// </summary>
+    internal static bool TryGetMonitorResolution(IntPtr windowHandle, out int width, out int height)
+    {
+        width = 0;
+        height = 0;
+        if (windowHandle == IntPtr.Zero) return false;
+
+        var monitor = MonitorFromWindow(windowHandle, MonitorDefaultToNearest);
+        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+        if (monitor == IntPtr.Zero || !GetMonitorInfoW(monitor, ref info)) return false;
+
+        width = info.Monitor.Right - info.Monitor.Left;
+        height = info.Monitor.Bottom - info.Monitor.Top;
+        return width > 0 && height > 0;
+    }
+
     internal static (double Minimum, double Maximum, double DpiScale) Get(Window window)
     {
         var handle = new WindowInteropHelper(window).Handle;
-        var monitor = MonitorFromWindow(handle, MonitorDefaultToNearest);
-        var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
-        if (monitor == IntPtr.Zero || !GetMonitorInfoW(monitor, ref info))
-            throw new StageException("NOTES0005", LanguageManager.Get("DisplayMetricsUnavailable"));
-        var width = info.Monitor.Right - info.Monitor.Left;
-        var height = info.Monitor.Bottom - info.Monitor.Top;
-        if (width <= 0 || height <= 0)
+        if (!TryGetMonitorResolution(handle, out var width, out var height))
             throw new StageException("NOTES0005", LanguageManager.Get("DisplayMetricsUnavailable"));
         var average = (width + (double)height) / 2;
         var source = PresentationSource.FromVisual(window);

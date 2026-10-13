@@ -86,6 +86,6 @@ public partial class MainWindow
         if (value == lastTaskProgressText) return;
         lastTaskProgressText = value;
         EditStatusLabel.Visibility = Visibility.Visible;
-        EditStatusLabel.Content = value;
+        EditStatusText.Text = value;
     }
 }

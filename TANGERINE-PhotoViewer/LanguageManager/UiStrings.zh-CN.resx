@@ -327,6 +327,63 @@
   <data name="SwitchTool">
     <value>切换工具</value>
   </data>
+  <data name="Undo">
+    <value>撤销</value>
+  </data>
+  <data name="Redo">
+    <value>重做</value>
+  </data>
+  <data name="HistoryFailed">
+    <value>无法恢复编辑历史。</value>
+  </data>
+  <data name="Timeline">
+    <value>时间线</value>
+  </data>
+  <data name="TimelineGoTo">
+    <value>到那里</value>
+  </data>
+  <data name="TimelineBrush">
+    <value>操作了画笔</value>
+  </data>
+  <data name="TimelineEraser">
+    <value>操作了橡皮</value>
+  </data>
+  <data name="TimelineTextCreated">
+    <value>创建了文字</value>
+  </data>
+  <data name="TimelineTextEdited">
+    <value>编辑了文字</value>
+  </data>
+  <data name="TimelineTextColor">
+    <value>更改了文字的颜色</value>
+  </data>
+  <data name="TimelineTextFont">
+    <value>更改了文字的字体</value>
+  </data>
+  <data name="TimelineTextStyle">
+    <value>更改了文字的样式</value>
+  </data>
+  <data name="TimelineTextSize">
+    <value>更改了文字的大小</value>
+  </data>
+  <data name="TimelineTextFormatting">
+    <value>更改了文字的格式</value>
+  </data>
+  <data name="TimelineTextResized">
+    <value>调整了文字框大小</value>
+  </data>
+  <data name="TimelineTextMoved">
+    <value>移动了文字框</value>
+  </data>
+  <data name="TimelineOpenStarted">
+    <value>开始打开{0}</value>
+  </data>
+  <data name="TimelineOpenCompleted">
+    <value>完成打开{0}</value>
+  </data>
+  <data name="TimelineEarlierHistory">
+    <value>更早的操作（已超出历史范围）</value>
+  </data>
   <data name="ExitEditMode">
     <value>退出编辑模式</value>
   </data>
@@ -391,7 +448,7 @@
     <value>PNG 图片|*.png</value>
   </data>
   <data name="EditingUnmodified">
-    <value>正在编辑文档；没有未保存的笔记。</value>
+    <value>正在编辑文档；没有未保存的编辑。</value>
   </data>
   <data name="EditedSaved">
     <value>当前图片的笔记已保存。</value>
@@ -558,4 +615,31 @@
   <data name="DiameterAtPointer">
     <value>指针位置：{0}像素</value>
   </data>
+  <data name="UnsavedChangesPrompt">
+    <value>当前图片有未保存的编辑。是否先另存为？选择“否”将放弃编辑，选择“取消”将留在当前图片。</value>
+  </data>
+  <data name="UnsavedChangesPromptFailed">
+    <value>无法确认如何处理未保存的编辑。</value>
+  </data>
+  <data name="CloseWindow">
+    <value>关闭窗口</value>
+  </data>
+  <data name="UnsavedSaveFailedPrompt">
+    <value>另存为失败。请选择重新选择路径保存、放弃编辑并继续，或取消当前操作。</value>
+  </data>
+  <data name="UnsavedRetrySaveAs">
+    <value>重新选择路径另存为</value>
+  </data>
+  <data name="UnsavedDiscardAndContinue">
+    <value>不保存并{0}</value>
+  </data>
+  <data name="CropTool"><value>裁剪</value></data>
+  <data name="RotateEditTool"><value>旋转(编辑)</value></data>
+  <data name="CropRecenter"><value>回中</value></data>
+  <data name="CropRecenterCompleted"><value>回中完成</value></data>
+  <data name="TimelineCropped"><value>裁剪了图片</value></data>
+  <data name="TimelineCropMoved"><value>移动了裁剪区域</value></data>
+  <data name="TimelineRotateLeftEdit"><value>向左旋转了图片</value></data>
+  <data name="TimelineRotateRightEdit"><value>向右旋转了图片</value></data>
+  <data name="CropBoundaryTip"><value>裁剪选区的四个角不能移出图片。</value></data>
 </root>

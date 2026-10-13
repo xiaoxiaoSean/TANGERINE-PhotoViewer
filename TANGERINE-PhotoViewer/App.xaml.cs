@@ -11,6 +11,7 @@ namespace TANGERINE_PhotoViewer
     {
         static App()
         {
+            RoundedControlCorners.Register();
             // Apply ImageMagick cache limits before any decoder initializes.
             // The map limit has no public Magick.NET setter.
             Environment.SetEnvironmentVariable("MAGICK_MEMORY_LIMIT", "256MiB",

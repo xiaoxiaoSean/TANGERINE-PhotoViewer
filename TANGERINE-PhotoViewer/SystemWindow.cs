@@ -29,7 +29,11 @@ public sealed class SystemWindow : Window
     {
         Title = LanguageManager.Get("SystemOperations");
         Icon = IconAssets.WindowIcon;
-        Width = 650; Height = 560; Background = Brushes.Black; Foreground = Brushes.White;
+        Width = SystemParameters.WorkArea.Width * .42;
+        Height = SystemParameters.WorkArea.Height * .62;
+        Background = Brushes.Black;
+        Foreground = Brushes.White;
+        Resources.Add(typeof(Button), CreateActionButtonStyle());
         var root = new DockPanel { Margin = new Thickness(12) };
         var actions = new StackPanel();
         var selectionActions = new StackPanel { Orientation = Orientation.Horizontal };
@@ -68,6 +72,35 @@ public sealed class SystemWindow : Window
         status.Text = LanguageManager.Get("Ready");
         SetBusy(false);
         Closing += (_, e) => { if (operation is not null) { e.Cancel = true; closeRequested = true; operation.Cancel(); status.Text = LanguageManager.Get("DefaultAppsWait"); } };
+    }
+
+    /// <summary>
+    /// Give every system action the same black-and-white template. The default WPF
+    /// theme paints disabled buttons gray, which made Stop look unrelated to the
+    /// other actions even though its enabled state is managed correctly by SetBusy.
+    /// </summary>
+    private static Style CreateActionButtonStyle()
+    {
+        var border = new FrameworkElementFactory(typeof(Border));
+        border.SetValue(Border.BackgroundProperty, Brushes.Black);
+        border.SetValue(Border.BorderBrushProperty, Brushes.White);
+        border.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
+        border.SetValue(Border.PaddingProperty, new Thickness(8, 4, 8, 4));
+
+        var content = new FrameworkElementFactory(typeof(ContentPresenter));
+        content.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        content.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+        content.SetValue(ContentPresenter.RecognizesAccessKeyProperty, true);
+        border.AppendChild(content);
+
+        var style = new Style(typeof(Button));
+        style.Setters.Add(new Setter(Control.BackgroundProperty, Brushes.Black));
+        style.Setters.Add(new Setter(Control.ForegroundProperty, Brushes.White));
+        style.Setters.Add(new Setter(Control.MarginProperty, new Thickness(4)));
+        style.Setters.Add(new Setter(Control.TemplateProperty,
+            new ControlTemplate(typeof(Button)) { VisualTree = border }));
+        return style;
     }
 
     private void SelectAll(bool selected)

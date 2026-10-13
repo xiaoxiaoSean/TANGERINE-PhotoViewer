@@ -60,12 +60,20 @@ public partial class MainWindow
     private Point? textDragOrigin;
     private Border? textDragPreview;
     private bool installingTextNote;
+    private bool historyMutatingText;
+    private TextState? textFrameBefore;
     // Attached formatting follows a Run through WPF's rich-text split/merge
     // operations. A Run-keyed dictionary would retain deleted text indefinitely.
-    private static readonly DependencyProperty RunShadowSizeProperty =
+    public static readonly DependencyProperty RunShadowSizeProperty =
         DependencyProperty.RegisterAttached("RunShadowSize", typeof(double),
             typeof(MainWindow), new FrameworkPropertyMetadata(double.NaN,
                 FrameworkPropertyMetadataOptions.Inherits));
+
+    // Public accessors let WPF's XAML serializer round-trip selected-range shadow values.
+    public static double GetRunShadowSize(DependencyObject element) =>
+        (double)element.GetValue(RunShadowSizeProperty);
+    public static void SetRunShadowSize(DependencyObject element, double value) =>
+        element.SetValue(RunShadowSizeProperty, value);
     private readonly SemaphoreSlim textPreviewGate = new(1, 1);
     private int pendingTextPreviewWorkers;
     private TextNote? queuedTextShadowNote;
@@ -229,8 +237,18 @@ public partial class MainWindow
             };
             editor.TextChanged += (_, _) =>
             {
-                if (installingTextNote) return;
+                if (installingTextNote || restoringHistory || historyMutatingText) return;
                 notesVersion++;
+                try
+                {
+                    if (textHistoryStates.TryGetValue(note, out var before))
+                        RecordTextMutation(note, before);
+                }
+                catch (Exception ex)
+                {
+                    ShowNotesError(new StageException("TEXT0008", LanguageManager.Get("TextRenderingFailed"), ex)); // TEXT0008
+                    return;
+                }
                 noteStatusResult = false;
                 note.ShadowPreviewDelay?.Stop();
                 note.ShadowPreviewDelay?.Start();
@@ -256,6 +274,7 @@ public partial class MainWindow
             notesVersion++;
             noteStatusResult = false;
             installingTextNote = false;
+            RecordTextCreation(note);
             editor.Focus();
             editor.SelectAll();
             UpdateTextSelectionMenu();
@@ -275,7 +294,7 @@ public partial class MainWindow
     private void ShowTextStatus(string key)
     {
         EditStatusLabel.Visibility = Visibility.Visible;
-        EditStatusLabel.Content = LanguageManager.Get(key);
+        EditStatusText.Text = LanguageManager.Get(key);
         noteStatusResult = true;
     }
 
@@ -324,6 +343,8 @@ public partial class MainWindow
         if (textDragPreview is not null) NotesCanvas.Children.Remove(textDragPreview);
         textDragPreview = null;
         draggedTextNote = null;
+        historyMutatingText = false;
+        textFrameBefore = null;
         SetHoveredTextNote(null);
         NotesCanvas.Cursor = null;
         selectedTextNote = null;
@@ -408,6 +429,13 @@ public partial class MainWindow
                 Math.Clamp(currentPixels, 1, maximum), maximum) { Owner = this };
             if (window.ShowDialog() != true) return;
             var chosen = window.SelectedSettings;
+            var actionKey = chosen.Color != current.Color ? "TimelineTextColor"
+                : chosen.FontFamilyName != current.FontFamilyName ? "TimelineTextFont"
+                : chosen.Bold != current.Bold ? "TimelineTextStyle"
+                : Math.Abs(window.SelectedFontPixels - currentPixels) > .001 ? "TimelineTextSize"
+                : "TimelineTextFormatting";
+            var before = SnapshotTextState(note);
+            historyMutatingText = true;
             // ApplyPropertyValue splits runs at the selection boundaries, so
             // neighboring characters retain their font size and other styles.
             selection.ApplyPropertyValue(TextElement.FontFamilyProperty,
@@ -429,8 +457,10 @@ public partial class MainWindow
             // The editor-level effect only applies to the whole rectangle. Keep
             // selected-range shadows in the per-run export model, so neighboring
             // text never acquires a shadow that the user did not request.
-            QueueSelectedShadowPreview(note);
             notesVersion++;
+            historyMutatingText = false;
+            RecordTextMutation(note, before, actionKey);
+            QueueSelectedShadowPreview(note);
             noteStatusResult = false;
             RefreshMenu();
             UpdateNoteStatus();
@@ -438,6 +468,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
+            historyMutatingText = false;
             ShowNotesError(new StageException("TEXT0003", LanguageManager.Get("TextRenderingFailed"), ex)); // TEXT0003
         }
     }
@@ -459,9 +490,13 @@ public partial class MainWindow
             var window = new TextFontSizeWindow(Math.Clamp(note.FontPixels, 1, maximum), maximum)
                 { Owner = this };
             if (window.ShowDialog() != true) return;
+            var before = SnapshotTextState(note);
+            historyMutatingText = true;
             note.FontPixels = window.SelectedFontPixels;
             ApplyTextNoteLayout(note);
             notesVersion++;
+            historyMutatingText = false;
+            RecordTextMutation(note, before, "TimelineTextSize");
             noteStatusResult = false;
             note.ShadowPreviewDelay?.Stop();
             note.ShadowPreviewDelay?.Start();
@@ -470,6 +505,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
+            historyMutatingText = false;
             ShowNotesError(new StageException("TEXT0006", LanguageManager.Get("TextRenderingFailed"), ex)); // TEXT0006
         }
     }
@@ -1014,6 +1050,15 @@ public partial class MainWindow
         resizingTextFrame = resize;
         textFrameDragStart = CurrentToReference(current, note);
         textFrameOriginalBounds = note.ReferenceBounds;
+        try { textFrameBefore = SnapshotTextState(note); }
+        catch (Exception ex)
+        {
+            draggedTextNote = null;
+            ShowNotesError(new StageException("TEXT0008", LanguageManager.Get("TextRenderingFailed"), ex)); // TEXT0008
+            e.Handled = true;
+            return true;
+        }
+        historyMutatingText = true;
         selectedTextNote = note;
         SetHoveredTextNote(note);
         Viewer.CaptureMouse();
@@ -1063,6 +1108,7 @@ public partial class MainWindow
             catch (Exception ex)
             {
                 draggedTextNote = null;
+                historyMutatingText = false;
                 Viewer.ReleaseMouseCapture();
                 ShowNotesError(new StageException("TEXT0007",
                     LanguageManager.Get("TextRenderingFailed"), ex)); // TEXT0007
@@ -1081,6 +1127,17 @@ public partial class MainWindow
         if (draggedTextNote is null || e.ChangedButton != MouseButton.Left) return false;
         var note = draggedTextNote;
         draggedTextNote = null;
+        historyMutatingText = false;
+        if (textFrameBefore is { } before)
+        {
+            textFrameBefore = null;
+            try { RecordTextMutation(note, before,
+                resizingTextFrame ? "TimelineTextResized" : "TimelineTextMoved"); }
+            catch (Exception ex)
+            {
+                ShowNotesError(new StageException("TEXT0008", LanguageManager.Get("TextRenderingFailed"), ex)); // TEXT0008
+            }
+        }
         Viewer.ReleaseMouseCapture();
         note.ShadowPreviewDelay?.Stop();
         note.ShadowPreviewDelay?.Start();

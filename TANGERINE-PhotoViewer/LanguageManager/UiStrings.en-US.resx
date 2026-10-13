@@ -327,6 +327,63 @@
   <data name="SwitchTool">
     <value>Switch tool</value>
   </data>
+  <data name="Undo">
+    <value>Undo</value>
+  </data>
+  <data name="Redo">
+    <value>Redo</value>
+  </data>
+  <data name="HistoryFailed">
+    <value>Could not restore the edit history.</value>
+  </data>
+  <data name="Timeline">
+    <value>Timeline</value>
+  </data>
+  <data name="TimelineGoTo">
+    <value>Go there</value>
+  </data>
+  <data name="TimelineBrush">
+    <value>Used brush</value>
+  </data>
+  <data name="TimelineEraser">
+    <value>Used eraser</value>
+  </data>
+  <data name="TimelineTextCreated">
+    <value>Created text</value>
+  </data>
+  <data name="TimelineTextEdited">
+    <value>Edited text</value>
+  </data>
+  <data name="TimelineTextColor">
+    <value>Changed text color</value>
+  </data>
+  <data name="TimelineTextFont">
+    <value>Changed text font</value>
+  </data>
+  <data name="TimelineTextStyle">
+    <value>Changed text style</value>
+  </data>
+  <data name="TimelineTextSize">
+    <value>Changed text size</value>
+  </data>
+  <data name="TimelineTextFormatting">
+    <value>Changed text formatting</value>
+  </data>
+  <data name="TimelineTextResized">
+    <value>Resized text box</value>
+  </data>
+  <data name="TimelineTextMoved">
+    <value>Moved text box</value>
+  </data>
+  <data name="TimelineOpenStarted">
+    <value>Started opening {0}</value>
+  </data>
+  <data name="TimelineOpenCompleted">
+    <value>Finished opening {0}</value>
+  </data>
+  <data name="TimelineEarlierHistory">
+    <value>Earlier operations (outside history limit)</value>
+  </data>
   <data name="ExitEditMode">
     <value>Exit edit mode</value>
   </data>
@@ -391,7 +448,7 @@
     <value>PNG image|*.png</value>
   </data>
   <data name="EditingUnmodified">
-    <value>Editing document; no unsaved notes.</value>
+    <value>Editing document; no unsaved edits.</value>
   </data>
   <data name="EditedSaved">
     <value>Current image notes were saved.</value>
@@ -558,4 +615,31 @@
   <data name="DiameterAtPointer">
     <value>Diameter at pointer: {0} px</value>
   </data>
+  <data name="UnsavedChangesPrompt">
+    <value>This image has unsaved edits. Save a copy with Save As before continuing? Choose No to discard the edits, or Cancel to stay here.</value>
+  </data>
+  <data name="UnsavedChangesPromptFailed">
+    <value>Could not confirm what to do with the unsaved edits.</value>
+  </data>
+  <data name="CloseWindow">
+    <value>Close window</value>
+  </data>
+  <data name="UnsavedSaveFailedPrompt">
+    <value>Save As failed. Choose whether to retry with a new path, discard the edits and continue, or cancel the action.</value>
+  </data>
+  <data name="UnsavedRetrySaveAs">
+    <value>Retry Save As with a new path</value>
+  </data>
+  <data name="UnsavedDiscardAndContinue">
+    <value>Discard edits and continue: {0}</value>
+  </data>
+  <data name="CropTool"><value>Crop</value></data>
+  <data name="RotateEditTool"><value>Rotate (Edit)</value></data>
+  <data name="CropRecenter"><value>Recenter crop</value></data>
+  <data name="CropRecenterCompleted"><value>Recenter complete</value></data>
+  <data name="TimelineCropped"><value>Cropped the image</value></data>
+  <data name="TimelineCropMoved"><value>Moved the crop</value></data>
+  <data name="TimelineRotateLeftEdit"><value>Rotated the image left</value></data>
+  <data name="TimelineRotateRightEdit"><value>Rotated the image right</value></data>
+  <data name="CropBoundaryTip"><value>Crop corners must stay inside the image.</value></data>
 </root>
